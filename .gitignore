@@ -1,0 +1,73 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev.log
+dev-server.log
+pw-install.log
+pw-install-err.log
+
+# local env files
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# ===== 项目垃圾文件（不需要上传） =====
+chrome.zip
+three.module.js
+all_icons_overview.png
+giftbox-scene.png
+screenshot*.png
+ss_icon*.png
+icon0*.png
+icon_0*.png
+icon_gallery.html
+icon_page_*.html
+icon_url_*.txt
+temp_*.html
+temp_*.txt
+starry-trail.html
+index.html
+1.txt
+idea.txt
+idea1.txt
+PLAN.md
+要求.txt
+新建文本文档.html
+/music/
+/星轨*/
+
+# ===== 编辑器和 AI 工具配置 =====
+.cursorrules
+AGENTS.md
+nul
+starry-scene-preview.png
+/DONE/
+/场景3-圣殿/
+/树/
+/图标/
+/-p/

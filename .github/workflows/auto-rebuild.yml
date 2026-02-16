@@ -1,0 +1,60 @@
+name: Auto Rebuild on User Changes
+
+on:
+  # 每小时检测一次
+  schedule:
+    - cron: '0 * * * *'
+  # push 到 main 时也触发（当 public/users/ 有变化）
+  push:
+    branches: [main]
+    paths:
+      - 'public/users/**'
+  # 手动触发
+  workflow_dispatch:
+
+jobs:
+  check-and-rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Auto-generate configs from name.txt + photos
+        run: node scripts/auto-generate-config.js
+
+      - name: Generate users.json
+        run: node scripts/generate-users.js
+
+      - name: Check for changes
+        id: changes
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes detected"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Changes detected:"
+            git diff --cached --name-only
+          fi
+
+      - name: Commit and push changes
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "auto: sync user configs and users.json"
+          git push
+
+      # Vercel 会自动监听 push 事件触发重建
+      # 如果需要手动触发 Vercel deploy hook，取消下面的注释并设置 VERCEL_DEPLOY_HOOK secret
+      # - name: Trigger Vercel rebuild
+      #   if: steps.changes.outputs.changed == 'true'
+      #   run: curl -X POST "${{ secrets.VERCEL_DEPLOY_HOOK }}"

@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 255, 255, 255;
+  --background-rgb: 0, 0, 0;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: #000;
+  color: rgb(var(--foreground-rgb));
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Smooth scrolling disabled for performance */
+html {
+  scroll-behavior: auto;
+}
+
+/* Hide scrollbars */
+::-webkit-scrollbar {
+  display: none;
+}

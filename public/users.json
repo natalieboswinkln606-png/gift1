@@ -1,0 +1,42 @@
+[
+  {
+    "id": "shushu",
+    "displayName": "胡慧怡的礼物",
+    "subtitle": "点击进入专属新年祝福",
+    "emoji": "🎁",
+    "gradient": "from-pink-500/20 to-purple-500/20",
+    "hoverBorder": "hover:border-pink-400/50",
+    "iconBg": "bg-pink-400/30",
+    "iconBgHover": "group-hover:bg-pink-400/50"
+  },
+  {
+    "id": "tian-shi-jie-jie",
+    "displayName": "黄荷姐姐的礼物",
+    "subtitle": "点击进入专属新年祝福",
+    "emoji": "🎁",
+    "gradient": "from-cyan-500/20 to-blue-500/20",
+    "hoverBorder": "hover:border-cyan-400/50",
+    "iconBg": "bg-cyan-400/30",
+    "iconBgHover": "group-hover:bg-cyan-400/50"
+  },
+  {
+    "id": "xiaoqi",
+    "displayName": "小七的礼物",
+    "subtitle": "点击进入专属新年祝福",
+    "emoji": "🎁",
+    "gradient": "from-green-500/20 to-emerald-500/20",
+    "hoverBorder": "hover:border-green-400/50",
+    "iconBg": "bg-green-400/30",
+    "iconBgHover": "group-hover:bg-green-400/50"
+  },
+  {
+    "id": "zhouxingyun",
+    "displayName": "周行芸的礼物",
+    "subtitle": "点击进入专属新年祝福",
+    "emoji": "🎁",
+    "gradient": "from-orange-500/20 to-red-500/20",
+    "hoverBorder": "hover:border-orange-400/50",
+    "iconBg": "bg-orange-400/30",
+    "iconBgHover": "group-hover:bg-orange-400/50"
+  }
+]
