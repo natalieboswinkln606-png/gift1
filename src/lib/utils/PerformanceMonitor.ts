@@ -1,91 +1,77 @@
 import type { QualityLevel } from '@/types'
 
+/**
+ * 运行时 FPS 监控器：根据实际帧率动态调整质量等级
+ *
+ * 适配自参考版本，增加以下改进：
+ * - 构造函数接受 initialQuality 参数，ULTRA_LOW 设备跳过动态调整
+ * - 降级下限为 LOW（永远不会动态设为 ULTRA_LOW，该等级仅由 QualityDetector 静态检测设定）
+ * - 升级需要连续 180 帧（3 秒）高 FPS，避免短暂峰值误触发
+ */
+
+// 质量等级排序（用于升降级比较）
+const QUALITY_ORDER: QualityLevel[] = ['ULTRA_LOW', 'LOW', 'MEDIUM', 'HIGH']
+
+// 阈值配置
+const DOWNGRADE_FPS = 24       // 低于此值触发降级
+const UPGRADE_FPS = 50         // 高于此值触发升级
+const SAMPLE_FRAMES = 60       // 采样帧数（约 1 秒）
+const UPGRADE_STREAK_NEEDED = 3 // 连续 3 个采样周期（~3 秒）高 FPS 才升级
+
 export class PerformanceMonitor {
-  private fps = 60
-  private frameCount = 0
-  private lastTime = performance.now()
-  private emaFps = 60
-  private readonly EMA_ALPHA = 0.1
   private currentQuality: QualityLevel
-  private lastCheckTime = 0
-  private consecutiveLowFrames = 0
-  private consecutiveHighFrames = 0
+  private frameTimes: number[] = []
   private onQualityChange: ((quality: QualityLevel) => void) | null = null
+  private upgradeStreak = 0
+  private skipDynamic: boolean  // ULTRA_LOW 设备跳过动态调整
 
-  constructor() {
-    this.currentQuality = PerformanceMonitor.detectInitialQuality()
+  constructor(initialQuality: QualityLevel) {
+    this.currentQuality = initialQuality
+    // ULTRA_LOW 设备已经是最低配置，无需动态调整
+    this.skipDynamic = initialQuality === 'ULTRA_LOW'
   }
 
-  // 根据设备硬件能力预判初始质量等级
-  static detectInitialQuality(): QualityLevel {
-    if (typeof window === 'undefined' || typeof navigator === 'undefined') return 'HIGH'
-    const cores = navigator.hardwareConcurrency || 4
-    const dpr = window.devicePixelRatio || 1
-    if (cores <= 2) return 'LOW'
-    if (cores <= 4 || dpr <= 1) return 'MEDIUM'
-    return 'HIGH'
-  }
-
+  /** 注册质量变化回调 */
   setOnQualityChange(callback: (quality: QualityLevel) => void): void {
     this.onQualityChange = callback
   }
 
-  update(): void {
-    this.frameCount++
-    const now = performance.now()
-    const delta = now - this.lastTime
+  /** 每帧调用，传入 deltaTime（秒） */
+  update(dt: number): void {
+    if (this.skipDynamic) return
 
-    if (delta >= 1000) {
-      const instantFps = Math.round((this.frameCount * 1000) / delta)
-      this.fps = instantFps
-      this.emaFps = this.EMA_ALPHA * instantFps + (1 - this.EMA_ALPHA) * this.emaFps
+    this.frameTimes.push(dt)
 
-      this.frameCount = 0
-      this.lastTime = now
+    if (this.frameTimes.length >= SAMPLE_FRAMES) {
+      const avgDt = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length
+      const avgFps = avgDt > 0 ? 1 / avgDt : 60
+      this.frameTimes.length = 0
 
-      if (now - this.lastCheckTime >= 1000) {
-        this.checkQuality()
-        this.lastCheckTime = now
+      const currentIndex = QUALITY_ORDER.indexOf(this.currentQuality)
+
+      if (avgFps < DOWNGRADE_FPS && currentIndex > 1) {
+        // 降级（下限为 LOW，索引 1）
+        this.upgradeStreak = 0
+        const newQuality = QUALITY_ORDER[currentIndex - 1]
+        // 确保不降到 ULTRA_LOW（索引 0）
+        if (newQuality !== 'ULTRA_LOW') {
+          this.currentQuality = newQuality
+          this.onQualityChange?.(newQuality)
+        }
+      } else if (avgFps > UPGRADE_FPS && currentIndex < QUALITY_ORDER.length - 1) {
+        // 升级需要连续多个周期确认
+        this.upgradeStreak++
+        if (this.upgradeStreak >= UPGRADE_STREAK_NEEDED) {
+          this.upgradeStreak = 0
+          const newQuality = QUALITY_ORDER[currentIndex + 1]
+          this.currentQuality = newQuality
+          this.onQualityChange?.(newQuality)
+        }
+      } else {
+        // FPS 在正常范围，重置升级计数
+        this.upgradeStreak = 0
       }
     }
-  }
-
-  private checkQuality(): void {
-    if (this.emaFps < 25 && this.currentQuality !== 'LOW') {
-      this.consecutiveLowFrames++
-      this.consecutiveHighFrames = 0
-      if (this.consecutiveLowFrames >= 2) {
-        this.setQuality('LOW')
-        this.consecutiveLowFrames = 0
-      }
-    } else if (this.emaFps < 40 && this.currentQuality === 'HIGH') {
-      this.consecutiveLowFrames++
-      this.consecutiveHighFrames = 0
-      if (this.consecutiveLowFrames >= 2) {
-        this.setQuality('MEDIUM')
-        this.consecutiveLowFrames = 0
-      }
-    } else if (this.emaFps >= 40 && this.currentQuality !== 'HIGH') {
-      this.consecutiveHighFrames++
-      this.consecutiveLowFrames = 0
-      if (this.consecutiveHighFrames >= 3) {
-        this.setQuality('HIGH')
-        this.consecutiveHighFrames = 0
-      }
-    } else {
-      this.consecutiveLowFrames = 0
-      this.consecutiveHighFrames = 0
-    }
-  }
-
-  private setQuality(quality: QualityLevel): void {
-    if (quality === this.currentQuality) return
-    this.currentQuality = quality
-    this.onQualityChange?.(quality)
-  }
-
-  getFPS(): number {
-    return this.fps
   }
 
   getQuality(): QualityLevel {

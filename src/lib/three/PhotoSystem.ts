@@ -1,54 +1,88 @@
-import * as THREE from 'three'
+import {
+  Camera,
+  DoubleSide,
+  Euler,
+  Group,
+  LinearFilter,
+  LinearMipmapLinearFilter,
+  Material,
+  Mesh,
+  MeshBasicMaterial,
+  Object3D,
+  PlaneGeometry,
+  SRGBColorSpace,
+  Scene,
+  Texture,
+  TextureLoader,
+  Vector3,
+} from 'three'
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { UserConfig } from '@/types'
 
 export class PhotoSystem {
-  photos: THREE.Mesh[] = []
-  photoGroup: THREE.Group
-  activePhoto: THREE.Mesh | null = null
-  private scene: THREE.Scene
-  private vTmp = new THREE.Vector3()
-  private hudTmp = new THREE.Vector3()
-  private localTmp = new THREE.Vector3()
+  photos: Mesh[] = []
+  photoGroup: Group
+  activePhoto: Mesh | null = null
+  private scene: Scene
+  private vTmp = new Vector3()
+  private hudTmp = new Vector3()
+  private localTmp = new Vector3()
   private treeHeight = 85
   private treeRadius = 35
   private photoIndex = 0
   private totalPhotos = 0
   private disposed = false
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: Scene) {
     this.scene = scene
-    this.photoGroup = new THREE.Group()
+    this.photoGroup = new Group()
     scene.add(this.photoGroup)
   }
 
   async loadFromConfig(config: UserConfig, userId: string): Promise<void> {
     if (!config.christmasPhotos?.length) return
-    const loader = new THREE.TextureLoader()
+    const loader = new TextureLoader()
     const promises = config.christmasPhotos.map((photoPath) => {
       const url = `/users/${userId}/${photoPath}`
-      return new Promise<THREE.Texture>((resolve) => {
+      return new Promise<Texture | null>((resolve) => {
+        if (this.disposed) { resolve(null); return }
         loader.load(
           url,
           (tex) => {
-            tex.colorSpace = THREE.SRGBColorSpace
-            tex.minFilter = THREE.LinearMipmapLinearFilter
-            tex.magFilter = THREE.LinearFilter
-            tex.anisotropy = 16
+            if (this.disposed) { tex.dispose(); resolve(null); return }
+            // 限制纹理最大尺寸为 2048px，减少 GPU 显存占用（4K 照片 ~32MB → 2048 ~16MB）
+            const maxSize = 2048
+            const img = tex.image as HTMLImageElement
+            if (img.width > maxSize || img.height > maxSize) {
+              const scale = maxSize / Math.max(img.width, img.height)
+              const w = Math.floor(img.width * scale)
+              const h = Math.floor(img.height * scale)
+              const canvas = document.createElement('canvas')
+              canvas.width = w
+              canvas.height = h
+              const ctx = canvas.getContext('2d')!
+              ctx.drawImage(img, 0, 0, w, h)
+              tex.image = canvas
+              tex.needsUpdate = true
+            }
+            tex.colorSpace = SRGBColorSpace
+            tex.minFilter = LinearMipmapLinearFilter
+            tex.magFilter = LinearFilter
+            tex.anisotropy = Math.min(4, 16)  // 限制 anisotropy 为 4，减少 GPU 采样开销
             tex.generateMipmaps = true
             resolve(tex)
           },
           undefined,
           () => {
             console.warn(`[PhotoSystem] Failed to load photo: ${url}`)
-            resolve(null as unknown as THREE.Texture)
+            resolve(null)
           }
         )
       })
     })
 
     const textures = await Promise.all(promises)
-    const validTextures = textures.filter((tex) => tex !== null)
+    const validTextures = textures.filter((tex): tex is Texture => tex !== null)
     if (this.disposed) return
     this.totalPhotos = validTextures.length
     this.photoIndex = 0
@@ -57,20 +91,20 @@ export class PhotoSystem {
     })
   }
 
-  addPhoto(tex: THREE.Texture): void {
+  addPhoto(tex: Texture): void {
     const aspect = tex.image.width / tex.image.height
     const h = 7
     const w = h * aspect
 
     // Frame
-    const frameGeo = new THREE.PlaneGeometry(w + 0.4, h + 1.0)
-    const frameMat = new THREE.MeshBasicMaterial({ color: 0x222222, side: THREE.DoubleSide })
-    const frame = new THREE.Mesh(frameGeo, frameMat)
+    const frameGeo = new PlaneGeometry(w + 0.4, h + 1.0)
+    const frameMat = new MeshBasicMaterial({ color: 0x222222, side: DoubleSide })
+    const frame = new Mesh(frameGeo, frameMat)
 
     // Photo
-    const pGeo = new THREE.PlaneGeometry(w, h)
-    const pMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, toneMapped: false })
-    const pMesh = new THREE.Mesh(pGeo, pMat)
+    const pGeo = new PlaneGeometry(w, h)
+    const pMat = new MeshBasicMaterial({ map: tex, side: DoubleSide, toneMapped: false })
+    const pMesh = new Mesh(pGeo, pMat)
     pMesh.position.set(0, 0.3, 0.05)
     frame.add(pMesh)
 
@@ -95,8 +129,8 @@ export class PhotoSystem {
     const sa = idx * goldenAngle
 
     frame.userData = {
-      treePos: new THREE.Vector3(tr * Math.cos(ta), th, tr * Math.sin(ta)),
-      treeRot: new THREE.Euler(0, -ta + Math.PI / 2, 0),
+      treePos: new Vector3(tr * Math.cos(ta), th, tr * Math.sin(ta)),
+      treeRot: new Euler(0, -ta + Math.PI / 2, 0),
       scatterRadius: sr,
       scatterAngle: sa,
       scatterY: ((idx / n) - 0.5) * 10, // evenly spread vertically too
@@ -108,7 +142,7 @@ export class PhotoSystem {
     this.photoIndex++
   }
 
-  setActivePhoto(photo: THREE.Mesh | null): void {
+  setActivePhoto(photo: Mesh | null): void {
     this.activePhoto = photo
   }
 
@@ -121,8 +155,8 @@ export class PhotoSystem {
   }
 
   /** Return all photo frame meshes (and their children) for raycasting */
-  getAllRaycastTargets(): THREE.Object3D[] {
-    const targets: THREE.Object3D[] = []
+  getAllRaycastTargets(): Object3D[] {
+    const targets: Object3D[] = []
     this.photos.forEach((frame) => {
       targets.push(frame)
       frame.children.forEach((child) => targets.push(child))
@@ -131,7 +165,7 @@ export class PhotoSystem {
   }
 
   /** Find the parent frame mesh for a raycasted object (could be the photo child) */
-  findFrameForObject(obj: THREE.Object3D): THREE.Mesh | null {
+  findFrameForObject(obj: Object3D): Mesh | null {
     for (const frame of this.photos) {
       if (obj === frame) return frame
       if (frame.children.includes(obj)) return frame
@@ -159,12 +193,12 @@ export class PhotoSystem {
     this.activePhoto = this.photos[(idx - 1 + this.photos.length) % this.photos.length]
   }
 
-  update(time: number, isTree: boolean, camera: THREE.Camera, controls: OrbitControls): void {
+  update(time: number, isTree: boolean, camera: Camera, controls: OrbitControls): void {
     // Compute HUD world position: 30 units in front of camera
     const hudWorldPos = this.hudTmp.set(0, 0, -30).applyMatrix4(camera.matrixWorld)
 
     this.photos.forEach((p) => {
-      const photoMesh = p.children[0] as THREE.Mesh | undefined
+      const photoMesh = p.children[0] as Mesh | undefined
 
       if (p === this.activePhoto && !isTree) {
         // Active photo in SCATTER mode: move to camera front
@@ -180,21 +214,21 @@ export class PhotoSystem {
 
         // Elevate render order and disable depth test so photo is always on top
         p.renderOrder = 9999
-        ;(p.material as THREE.Material).depthTest = false
+        ;(p.material as Material).depthTest = false
 
         if (photoMesh) {
           photoMesh.renderOrder = 10000
-          ;(photoMesh.material as THREE.Material).depthTest = false
+          ;(photoMesh.material as Material).depthTest = false
         }
       } else {
         if (!this.activePhoto) controls.enabled = true
 
         // Restore normal render order
         p.renderOrder = 0
-        ;(p.material as THREE.Material).depthTest = true
+        ;(p.material as Material).depthTest = true
         if (photoMesh) {
           photoMesh.renderOrder = 0
-          ;(photoMesh.material as THREE.Material).depthTest = true
+          ;(photoMesh.material as Material).depthTest = true
         }
 
         p.scale.lerp(this.vTmp.set(1, 1, 1), 0.1)
@@ -204,8 +238,11 @@ export class PhotoSystem {
           const rot = p.userData.treeRot
           p.rotation.set(rot.x, rot.y, rot.z)
         } else {
+          // 星璇模式：照片随粒子公转（角度随时间变化）+ 保留自转
           const r = p.userData.scatterRadius
-          const a = p.userData.scatterAngle
+          const baseAngle = p.userData.scatterAngle as number
+          const orbitSpeed = 0.15  // 公转速度，与粒子 shear 旋转协调
+          const a = baseAngle + time * orbitSpeed
           p.position.lerp(
             this.vTmp.set(
               r * Math.cos(a),
@@ -224,11 +261,11 @@ export class PhotoSystem {
     this.disposed = true
     this.photos.forEach((frame) => {
       frame.geometry.dispose()
-      ;(frame.material as THREE.Material).dispose()
+      ;(frame.material as Material).dispose()
       frame.children.forEach((child) => {
-        if (child instanceof THREE.Mesh) {
+        if (child instanceof Mesh) {
           child.geometry.dispose()
-          const mat = child.material as THREE.MeshBasicMaterial
+          const mat = child.material as MeshBasicMaterial
           mat.map?.dispose()
           mat.dispose()
         }

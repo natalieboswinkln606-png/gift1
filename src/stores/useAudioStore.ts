@@ -7,13 +7,15 @@ interface AudioStore {
   volume: number
   playlist: PlaylistItem[]
   currentIndex: number
+  audioMuted: boolean
 
   setPlaying: (v: boolean) => void
-  setCurrentSong: (name: string) => void
   setVolume: (v: number) => void
   setPlaylist: (playlist: PlaylistItem[]) => void
-  setCurrentIndex: (index: number) => void
   addToPlaylist: (items: PlaylistItem[]) => void
+  toggleMute: () => void
+  // 批量更新播放状态（避免 playSong 触发 3 次独立 set 导致 3 次重渲染）
+  setPlayingState: (isPlaying: boolean, currentSong: string, currentIndex: number) => void
   reset: () => void
 }
 
@@ -23,12 +25,14 @@ export const useAudioStore = create<AudioStore>((set) => ({
   volume: 0.8,
   playlist: [],
   currentIndex: 0,
+  audioMuted: false,
 
   setPlaying: (isPlaying) => set({ isPlaying }),
-  setCurrentSong: (currentSong) => set({ currentSong }),
   setVolume: (volume) => set({ volume }),
   setPlaylist: (playlist) => set({ playlist }),
-  setCurrentIndex: (currentIndex) => set({ currentIndex }),
   addToPlaylist: (items) => set((s) => ({ playlist: [...s.playlist, ...items] })),
-  reset: () => set({ isPlaying: false, currentSong: 'No Music Loaded', volume: 0.8, playlist: [], currentIndex: 0 }),
+  toggleMute: () => set((s) => ({ audioMuted: !s.audioMuted })),
+  // 单次 set 调用批量更新，1 次重渲染替代 3 次
+  setPlayingState: (isPlaying, currentSong, currentIndex) => set({ isPlaying, currentSong, currentIndex }),
+  reset: () => set({ isPlaying: false, currentSong: 'No Music Loaded', volume: 0.8, playlist: [], currentIndex: 0, audioMuted: false }),
 }))

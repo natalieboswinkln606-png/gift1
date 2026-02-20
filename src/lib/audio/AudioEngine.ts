@@ -12,10 +12,11 @@ export class AudioEngine {
   private mode: 'NONE' | 'FILE' | 'MIC' = 'NONE'
   private playlist: Array<{ name: string; url: string }> = []
   private currentIndex = 0
-  private kickTimeout: ReturnType<typeof setTimeout> | null = null
+  private kickCooldownFrames = 0  // 帧计数冷却替代 setTimeout
   private blobUrls: string[] = []
   private disposed = false
   private micInitializing = false
+  private muteUnsub: (() => void) | null = null  // useAudioStore 订阅取消函数
 
   bassEnergy = 0
   volume = 0
@@ -26,11 +27,21 @@ export class AudioEngine {
     this.audioElement = new Audio()
     this.audioElement.crossOrigin = 'anonymous'
     this.audioElement.addEventListener('ended', this.handleEnded)
+
+    // 订阅 audioMuted 状态变化，同步到 HTMLAudioElement
+    this.muteUnsub = useAudioStore.subscribe(
+      (state) => {
+        this.audioElement.muted = state.audioMuted
+      }
+    )
+    // 初始同步
+    this.audioElement.muted = useAudioStore.getState().audioMuted
   }
 
   private async ensureContext(): Promise<void> {
     if (!this.ctx) {
-      this.ctx = new AudioContext()
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      this.ctx = new AudioCtx()
       this.analyser = this.ctx.createAnalyser()
       this.analyser.fftSize = 256
       this.analyser.smoothingTimeConstant = 0.85
@@ -69,15 +80,10 @@ export class AudioEngine {
     this.audioElement.src = song.url
     this.mode = 'FILE'
 
-    if (this.ctx?.state === 'suspended') {
-      await this.ctx.resume()
-    }
-
     try {
       await this.audioElement.play()
-      useAudioStore.getState().setPlaying(true)
-      useAudioStore.getState().setCurrentSong(song.name)
-      useAudioStore.getState().setCurrentIndex(index)
+      // 批量更新：1 次 set 替代 3 次，避免 3 次重渲染
+      useAudioStore.getState().setPlayingState(true, song.name, index)
     } catch (err) {
       console.warn('Audio play failed:', err)
     }
@@ -138,23 +144,25 @@ export class AudioEngine {
 
     this.analyser.getByteFrequencyData(this.dataArray)
 
+    const len = this.dataArray.length
     let sum = 0
     let bass = 0
-    for (let i = 0; i < 128; i++) {
+    for (let i = 0; i < len; i++) {
       sum += this.dataArray[i]
       if (i < 10) bass += this.dataArray[i]
     }
 
-    this.volume = sum / 128
+    this.volume = sum / len
     this.bassEnergy = bass / 10
 
-    // Kick detection
+    // Kick 检测：帧计数冷却替代 setTimeout（消除定时器 GC 压力）
+    if (this.kickCooldownFrames > 0) {
+      this.kickCooldownFrames--
+      if (this.kickCooldownFrames === 0) this.isKick = false
+    }
     if (this.bassEnergy > 150 && !this.isKick) {
       this.isKick = true
-      if (this.kickTimeout) clearTimeout(this.kickTimeout)
-      this.kickTimeout = setTimeout(() => {
-        this.isKick = false
-      }, 100)
+      this.kickCooldownFrames = 6  // ~100ms at 60fps
     }
   }
 
@@ -232,9 +240,13 @@ export class AudioEngine {
 
   dispose(): void {
     this.disposed = true
+    this.muteUnsub?.()
+    this.muteUnsub = null
     this.stop()
+    this.audioElement.src = ''
+    this.audioElement.load()
     this.audioElement.removeEventListener('ended', this.handleEnded)
-    if (this.kickTimeout) clearTimeout(this.kickTimeout)
+    this.kickCooldownFrames = 0
     this.micSource?.disconnect()
     this.micStream?.getTracks().forEach((t) => t.stop())
     this.fileSource?.disconnect()

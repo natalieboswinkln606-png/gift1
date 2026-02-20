@@ -19,6 +19,46 @@ const usersDir = path.join(__dirname, '..', 'public', 'users')
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
 const DEFAULT_BLESSING = '星河璀璨，入梦皆甜，万般心意皆有回响。'
 
+// 星座日期范围
+const ZODIAC_RANGES = [
+  { sign: 'Capricorn',   startMonth: 12, startDay: 22, endMonth: 1,  endDay: 19 },
+  { sign: 'Aquarius',    startMonth: 1,  startDay: 20, endMonth: 2,  endDay: 18 },
+  { sign: 'Pisces',      startMonth: 2,  startDay: 19, endMonth: 3,  endDay: 20 },
+  { sign: 'Aries',       startMonth: 3,  startDay: 21, endMonth: 4,  endDay: 19 },
+  { sign: 'Taurus',      startMonth: 4,  startDay: 20, endMonth: 5,  endDay: 20 },
+  { sign: 'Gemini',      startMonth: 5,  startDay: 21, endMonth: 6,  endDay: 21 },
+  { sign: 'Cancer',      startMonth: 6,  startDay: 22, endMonth: 7,  endDay: 22 },
+  { sign: 'Leo',         startMonth: 7,  startDay: 23, endMonth: 8,  endDay: 22 },
+  { sign: 'Virgo',       startMonth: 8,  startDay: 23, endMonth: 9,  endDay: 22 },
+  { sign: 'Libra',       startMonth: 9,  startDay: 23, endMonth: 10, endDay: 23 },
+  { sign: 'Scorpio',     startMonth: 10, startDay: 24, endMonth: 11, endDay: 22 },
+  { sign: 'Sagittarius', startMonth: 11, startDay: 23, endMonth: 12, endDay: 21 },
+]
+
+function getConstellation(birthday) {
+  const parts = birthday.split('-')
+  if (parts.length !== 2) return ''
+  const month = parseInt(parts[0], 10)
+  const day = parseInt(parts[1], 10)
+  if (isNaN(month) || isNaN(day)) return ''
+
+  for (const range of ZODIAC_RANGES) {
+    if (range.startMonth > range.endMonth) {
+      if ((month === range.startMonth && day >= range.startDay) ||
+          (month === range.endMonth && day <= range.endDay)) {
+        return range.sign
+      }
+    } else {
+      if ((month === range.startMonth && day >= range.startDay) ||
+          (month === range.endMonth && day <= range.endDay) ||
+          (month > range.startMonth && month < range.endMonth)) {
+        return range.sign
+      }
+    }
+  }
+  return ''
+}
+
 function isImage(filename) {
   return IMAGE_EXTS.has(path.extname(filename).toLowerCase())
 }
@@ -68,8 +108,14 @@ function run() {
       }
 
       let displayName
+      let birthday = ''
       try {
-        displayName = fs.readFileSync(nameTxtPath, 'utf-8').trim()
+        const lines = fs.readFileSync(nameTxtPath, 'utf-8').split('\n').map(l => l.trim())
+        displayName = lines[0] || ''
+        // 第二行为生日（MM-DD 格式）
+        if (lines[1] && /^\d{2}-\d{2}$/.test(lines[1])) {
+          birthday = lines[1]
+        }
       } catch (err) {
         console.error(`[auto-config] 错误 "${userId}": 无法读取 name.txt: ${err.message}`)
         skipped++
@@ -88,12 +134,17 @@ function run() {
       const starrySilhouette = starryImages.length > 0 ? `starry/${starryImages[0]}` : ''
 
       // 构建新 config
+      const constellation = birthday ? getConstellation(birthday) : ''
       const newConfig = {
         name: displayName,
         identifier: userId,
         christmasPhotos,
         starrySilhouette,
         starryBlessing: DEFAULT_BLESSING,
+      }
+      // 仅在有星座数据时添加字段
+      if (constellation) {
+        newConfig.constellation = constellation
       }
 
       // 检查是否需要写入

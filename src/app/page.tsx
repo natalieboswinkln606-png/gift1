@@ -49,6 +49,11 @@ function StarBackground() {
     const handleResize = () => {
       canvas.width = window.innerWidth
       canvas.height = window.innerHeight
+      // 重新随机化星星位置，防止飞出画布
+      stars.forEach(star => {
+        star.x = Math.random() * canvas.width
+        star.y = Math.random() * canvas.height
+      })
     }
     window.addEventListener('resize', handleResize)
 

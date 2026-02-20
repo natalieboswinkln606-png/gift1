@@ -1,4 +1,20 @@
-import * as THREE from 'three'
+import {
+  AdditiveBlending,
+  BoxGeometry,
+  Color,
+  DynamicDrawUsage,
+  Group,
+  IcosahedronGeometry,
+  InstancedMesh,
+  Material,
+  Matrix4,
+  MeshBasicMaterial,
+  Scene,
+  TetrahedronGeometry,
+  Vector3,
+} from 'three'
+import { fastSin, fastCos } from './trigTable'
+import { BLOOM_LAYER } from './SelectiveBloom'
 
 /**
  * 双爱心粒子系统
@@ -16,9 +32,7 @@ import * as THREE from 'three'
  * 由 Three.js 矩阵层级自动处理旋转，消除每帧 12800 次 cos/sin 计算
  */
 
-const BLOOM_LAYER = 1
-const HEART_COUNT_PER_SIDE = 6400
-const TOTAL_PARTICLES = HEART_COUNT_PER_SIDE * 2
+const DEFAULT_HEART_COUNT_PER_SIDE = 6400
 const HEART_OFFSET_X = 50
 // 原始 scale=40 * pow(0.4, 1/3) ≈ 29.5，再缩小 1/2 体积 → scale * pow(0.5, 1/3) ≈ 23.4
 const HEART_SCALE = 40 * Math.pow(0.4, 1 / 3) * Math.pow(0.5, 1 / 3)
@@ -26,7 +40,7 @@ const HEART_SCALE = 40 * Math.pow(0.4, 1 / 3) * Math.pow(0.5, 1 / 3)
 const HEART_ROTATION_SPEED = 0.3
 
 interface HeartParticle {
-  basePos: THREE.Vector3   // 相对于爱心中心的局部坐标
+  basePos: Vector3   // 相对于爱心中心的局部坐标
   speed: number
   offset: number
   baseScale: number
@@ -40,7 +54,7 @@ interface HeartParticle {
  * (x² + 2.25z² + y² - 1)³ - x²y³ - 0.1125z²y³ < 0
  * 返回相对于爱心中心的局部坐标
  */
-function sampleHeartPoint(scale: number): THREE.Vector3 {
+function sampleHeartPoint(scale: number): Vector3 {
   for (let attempts = 0; attempts < 300; attempts++) {
     const x = Math.random() * 3 - 1.5
     const y = Math.random() * 3 - 1.5
@@ -49,51 +63,61 @@ function sampleHeartPoint(scale: number): THREE.Vector3 {
     const a = x2 + 2.25 * z2 + y2 - 1
     const b = x2 * y2 * y + 0.1125 * z2 * y2 * y
     if (a * a * a - b < 0) {
-      return new THREE.Vector3(x * scale, y * scale, z * scale)
+      return new Vector3(x * scale, y * scale, z * scale)
     }
   }
-  return new THREE.Vector3(0, 0, 0)
+  return new Vector3(0, 0, 0)
 }
 
 export class HeartDualSystem {
-  private leftGroup: THREE.Group
-  private rightGroup: THREE.Group
-  private outerGroup: THREE.Group
+  private leftGroup: Group
+  private rightGroup: Group
+  private outerGroup: Group
 
   // 左右各 3 个 InstancedMesh，挂到对应 Group 实现自动旋转
-  private leftMeshes: THREE.InstancedMesh[]
-  private rightMeshes: THREE.InstancedMesh[]
+  private leftMeshes: InstancedMesh[]
+  private rightMeshes: InstancedMesh[]
+  private allMeshes: InstancedMesh[] = []  // 缓存，避免每帧创建临时数组
 
   private particles: HeartParticle[] = []
-  private dummy = new THREE.Object3D()
+  private heartCountPerSide: number  // 每侧粒子数（质量分级）
 
-  constructor(scene: THREE.Scene) {
-    this.outerGroup = new THREE.Group()
+  private sharedGeos: [IcosahedronGeometry, BoxGeometry, TetrahedronGeometry]
+  private baseMat: MeshBasicMaterial
+  private frameCount = 0  // 帧计数器（用于左右心交替更新）
+
+  constructor(scene: Scene, heartCountPerSide = DEFAULT_HEART_COUNT_PER_SIDE) {
+    const HEART_COUNT_PER_SIDE = heartCountPerSide
+    const TOTAL_PARTICLES = HEART_COUNT_PER_SIDE * 2
+    this.heartCountPerSide = heartCountPerSide
+    this.outerGroup = new Group()
     this.outerGroup.visible = false
 
     // 左爱心组（x=-50）
-    this.leftGroup = new THREE.Group()
+    this.leftGroup = new Group()
     this.leftGroup.position.x = -HEART_OFFSET_X
     this.outerGroup.add(this.leftGroup)
 
     // 右爱心组（x=+50）
-    this.rightGroup = new THREE.Group()
+    this.rightGroup = new Group()
     this.rightGroup.position.x = HEART_OFFSET_X
     this.outerGroup.add(this.rightGroup)
 
     // 1:1 复刻源文件材质（line 424-430）
-    const mat = new THREE.MeshBasicMaterial({
+    const mat = new MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
       opacity: 0.25,
-      blending: THREE.AdditiveBlending,
+      blending: AdditiveBlending,
       depthWrite: false,
     })
+    this.baseMat = mat
 
     // 1:1 复刻源文件几何体尺寸（lines 432-434）
-    const sphereGeo = new THREE.IcosahedronGeometry(0.35, 1)
-    const boxGeo = new THREE.BoxGeometry(0.45, 0.45, 0.45)
-    const tetraGeo = new THREE.TetrahedronGeometry(0.5)
+    const sphereGeo = new IcosahedronGeometry(0.35, 1)
+    const boxGeo = new BoxGeometry(0.45, 0.45, 0.45)
+    const tetraGeo = new TetrahedronGeometry(0.5)
+    this.sharedGeos = [sphereGeo, boxGeo, tetraGeo]
 
     // 每侧的粒子分配比例：50% sphere, 30% box, 20% tetra
     const countSpherePerSide = Math.floor(HEART_COUNT_PER_SIDE * 0.5)
@@ -101,21 +125,21 @@ export class HeartDualSystem {
     const countTetraPerSide = HEART_COUNT_PER_SIDE - countSpherePerSide - countBoxPerSide
 
     // 创建左侧 mesh
-    const meshSphereL = new THREE.InstancedMesh(sphereGeo, mat.clone(), countSpherePerSide)
-    const meshBoxL = new THREE.InstancedMesh(boxGeo, mat.clone(), countBoxPerSide)
-    const meshTetraL = new THREE.InstancedMesh(tetraGeo, mat.clone(), countTetraPerSide)
+    const meshSphereL = new InstancedMesh(sphereGeo, mat.clone(), countSpherePerSide)
+    const meshBoxL = new InstancedMesh(boxGeo, mat.clone(), countBoxPerSide)
+    const meshTetraL = new InstancedMesh(tetraGeo, mat.clone(), countTetraPerSide)
     this.leftMeshes = [meshSphereL, meshBoxL, meshTetraL]
 
     // 创建右侧 mesh
-    const meshSphereR = new THREE.InstancedMesh(sphereGeo, mat.clone(), countSpherePerSide)
-    const meshBoxR = new THREE.InstancedMesh(boxGeo, mat.clone(), countBoxPerSide)
-    const meshTetraR = new THREE.InstancedMesh(tetraGeo, mat.clone(), countTetraPerSide)
+    const meshSphereR = new InstancedMesh(sphereGeo, mat.clone(), countSpherePerSide)
+    const meshBoxR = new InstancedMesh(boxGeo, mat.clone(), countBoxPerSide)
+    const meshTetraR = new InstancedMesh(tetraGeo, mat.clone(), countTetraPerSide)
     this.rightMeshes = [meshSphereR, meshBoxR, meshTetraR]
 
     // 左侧 mesh 挂到 leftGroup
     this.leftMeshes.forEach(m => {
       m.layers.enable(BLOOM_LAYER)
-      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      m.instanceMatrix.setUsage(DynamicDrawUsage)
       m.frustumCulled = false
       this.leftGroup.add(m)
     })
@@ -123,18 +147,18 @@ export class HeartDualSystem {
     // 右侧 mesh 挂到 rightGroup
     this.rightMeshes.forEach(m => {
       m.layers.enable(BLOOM_LAYER)
-      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      m.instanceMatrix.setUsage(DynamicDrawUsage)
       m.frustumCulled = false
       this.rightGroup.add(m)
     })
 
     // 颜色配置：全部蓝色系
     const colors = {
-      skyBlue: new THREE.Color('#66bbff').multiplyScalar(1.5),
-      lightBlue: new THREE.Color('#aaddff').multiplyScalar(1.5),
-      deepBlue: new THREE.Color('#4488ff').multiplyScalar(2.0),
-      cyan: new THREE.Color('#44ccff').multiplyScalar(1.3),
-      paleBlue: new THREE.Color('#88aaff').multiplyScalar(1.8),
+      skyBlue: new Color('#66bbff').multiplyScalar(1.5),
+      lightBlue: new Color('#aaddff').multiplyScalar(1.5),
+      deepBlue: new Color('#4488ff').multiplyScalar(2.0),
+      cyan: new Color('#44ccff').multiplyScalar(1.3),
+      paleBlue: new Color('#88aaff').multiplyScalar(1.8),
     }
 
     // 每侧的 mesh 内部索引计数器
@@ -142,7 +166,8 @@ export class HeartDualSystem {
     const rightCounters = [0, 0, 0]
 
     // 生成粒子
-    const color = new THREE.Color()
+    const color = new Color()
+    const tmpMatrix = new Matrix4()  // 复用单个实例，避免循环中创建 12800 个
     for (let i = 0; i < TOTAL_PARTICLES; i++) {
       const isLeft = i < HEART_COUNT_PER_SIDE
       const side: 0 | 1 = isLeft ? 0 : 1
@@ -189,16 +214,17 @@ export class HeartDualSystem {
       color.multiplyScalar(0.8 + Math.random() * 0.4)
 
       // 初始矩阵设置（局部坐标，Group 层级自动处理世界偏移）
-      this.dummy.position.set(basePos.x, basePos.y, basePos.z)
-      this.dummy.scale.setScalar(p.baseScale)
-      this.dummy.updateMatrix()
+      // 复用单个 Matrix4 实例，避免循环中创建 12800 个临时对象
+      tmpMatrix.makeScale(p.baseScale, p.baseScale, p.baseScale)
+      tmpMatrix.setPosition(basePos.x, basePos.y, basePos.z)
 
       const meshArr = isLeft ? this.leftMeshes : this.rightMeshes
-      meshArr[meshIndex].setMatrixAt(internalIndex, this.dummy.matrix)
+      meshArr[meshIndex].setMatrixAt(internalIndex, tmpMatrix)
       meshArr[meshIndex].setColorAt(internalIndex, color)
     }
 
     const allMeshes = [...this.leftMeshes, ...this.rightMeshes]
+    this.allMeshes = allMeshes
     allMeshes.forEach(m => {
       if (m.instanceColor) m.instanceColor.needsUpdate = true
       m.instanceMatrix.needsUpdate = true
@@ -217,41 +243,72 @@ export class HeartDualSystem {
 
   update(time: number, _dt: number): void {
     if (!this.outerGroup.visible) return
+    this.frameCount++
 
     // 爱心按自身中心轴旋转 — Three.js 矩阵层级自动应用到子 InstancedMesh
     this.leftGroup.rotation.y = time * HEART_ROTATION_SPEED
     this.rightGroup.rotation.y = -time * HEART_ROTATION_SPEED
 
-    // 更新粒子闪烁和自旋（无需手动旋转计算，Group 层级已处理）
-    for (let i = 0; i < TOTAL_PARTICLES; i++) {
+    // 左右心交替更新：奇数帧更新左心，偶数帧更新右心
+    const updateLeft = this.frameCount % 2 === 0
+    const startIdx = updateLeft ? 0 : this.heartCountPerSide
+    const endIdx = updateLeft ? this.heartCountPerSide : this.particles.length
+
+    // 预计算共享的 ry 的 sin/cos（所有粒子的 ry = time * 0.5 相同）
+    const ry = time * 0.5
+    const cy = Math.cos(ry), sy = Math.sin(ry)
+
+    for (let i = startIdx; i < endIdx; i++) {
       const p = this.particles[i]
 
-      // 1:1 复刻源文件闪烁算法（lines 846-848）
-      const blink = Math.sin(time * p.speed + p.offset)
-      const intensity = Math.pow(0.5 * blink + 0.5, 3.0)
+      // 1:1 复刻源文件闪烁算法（lines 846-848）— 使用查找表替代 Math.sin/cos
+      const blink = fastSin(time * p.speed + p.offset)
+      // Math.pow(x, 3) → 手动乘法（V8 中更快）
+      const halfBlink = 0.5 * blink + 0.5
+      const intensity = halfBlink * halfBlink * halfBlink
       const scale = p.baseScale * (0.3 + 1.2 * intensity)
 
-      // 局部坐标（Group 层级自动处理世界偏移和旋转）
-      this.dummy.position.set(p.basePos.x, p.basePos.y, p.basePos.z)
-      this.dummy.scale.setScalar(scale)
-      // 1:1 复刻源文件旋转（line 853）
-      this.dummy.rotation.set(time + p.offset, time * 0.5, 0)
-      this.dummy.updateMatrix()
+      // 1:1 复刻源文件旋转（line 853）— rx 每粒子不同，ry 共享预计算，查找表替代 Math.cos/sin
+      const rx = time + p.offset
+      const cx = fastCos(rx), sx = fastSin(rx)
 
       const meshArr = p.side === 0 ? this.leftMeshes : this.rightMeshes
-      meshArr[p.meshIndex].setMatrixAt(p.internalIndex, this.dummy.matrix)
+      const targetArray = meshArr[p.meshIndex].instanceMatrix.array as Float32Array
+      const matOffset = p.internalIndex * 16
+
+      // 直接写入 4x4 变换矩阵（列主序）：T * Ry * Rx * S
+      targetArray[matOffset]      = cy * scale
+      targetArray[matOffset + 1]  = sx * sy * scale
+      targetArray[matOffset + 2]  = -cx * sy * scale
+      targetArray[matOffset + 3]  = 0
+      targetArray[matOffset + 4]  = 0
+      targetArray[matOffset + 5]  = cx * scale
+      targetArray[matOffset + 6]  = sx * scale
+      targetArray[matOffset + 7]  = 0
+      targetArray[matOffset + 8]  = sy * scale
+      targetArray[matOffset + 9]  = -sx * cy * scale
+      targetArray[matOffset + 10] = cx * cy * scale
+      targetArray[matOffset + 11] = 0
+      targetArray[matOffset + 12] = p.basePos.x
+      targetArray[matOffset + 13] = p.basePos.y
+      targetArray[matOffset + 14] = p.basePos.z
+      targetArray[matOffset + 15] = 1
     }
 
-    const allMeshes = [...this.leftMeshes, ...this.rightMeshes]
-    allMeshes.forEach(m => { m.instanceMatrix.needsUpdate = true })
+    // 只标记更新的那一侧的 mesh 需要上传
+    const updatedMeshes = updateLeft ? this.leftMeshes : this.rightMeshes
+    updatedMeshes.forEach(m => { m.instanceMatrix.needsUpdate = true })
   }
 
   dispose(): void {
-    const allMeshes = [...this.leftMeshes, ...this.rightMeshes]
+    const allMeshes = this.allMeshes
     allMeshes.forEach(m => {
-      m.geometry.dispose()
-      ;(m.material as THREE.Material).dispose()
+      // geometry 是共享的，不在此处 dispose（下方统一释放）
+      ;(m.material as Material).dispose()
     })
+    // 统一释放共享几何体和基础材质
+    this.sharedGeos.forEach(g => g.dispose())
+    this.baseMat.dispose()
     this.outerGroup.parent?.remove(this.outerGroup)
   }
 }

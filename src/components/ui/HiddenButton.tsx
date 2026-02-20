@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useTypewriter } from '@/hooks/useTypewriter'
+import { useAppStore } from '@/stores/useAppStore'
 
 interface HiddenButtonProps {
   onActivate: () => void
@@ -9,8 +11,13 @@ interface HiddenButtonProps {
 
 export default function HiddenButton({ onActivate, particleProximity }: HiddenButtonProps) {
   const [position, setPosition] = useState({ x: 0, y: 0 })
-  const [showMessage, setShowMessage] = useState(false)
+  const [showBubble, setShowBubble] = useState(false)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activatedRef = useRef(false)
+  const quality = useAppStore((s) => s.quality)
+
+  const message = '特别鸣谢你制造更欢乐的我！'
+  const displayText = useTypewriter(message, showBubble)
 
   // Random position on mount, excluding center area
   useEffect(() => {
@@ -34,47 +41,67 @@ export default function HiddenButton({ onActivate, particleProximity }: HiddenBu
   }, [])
 
   const handleClick = useCallback(() => {
-    if (!showMessage) {
-      setShowMessage(true)
-      onActivate()
-      // Auto-hide after 3 seconds
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
-      hideTimerRef.current = setTimeout(() => setShowMessage(false), 3000)
-    }
-  }, [showMessage, onActivate])
+    if (activatedRef.current) return
+    activatedRef.current = true
+    setShowBubble(true)
+    onActivate()
 
-  // Cleanup timer on unmount
+    // 3秒后收回
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+    hideTimerRef.current = setTimeout(() => {
+      setShowBubble(false)
+      activatedRef.current = false
+    }, 3000)
+  }, [onActivate])
+
+  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
     }
   }, [])
 
-  // Particle proximity affects visibility — raised cap for discoverability
-  const opacity = Math.min(0.6, particleProximity * 0.8 + 0.1)
+  // Particle proximity affects visibility — subtle presence
+  const opacity = Math.min(0.2, particleProximity * 0.27 + 0.033)
 
   return (
     <div
-      className="absolute z-30 cursor-pointer"
+      className="absolute z-30"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
         transform: 'translate(-50%, -50%)',
       }}
-      onClick={handleClick}
     >
-      <div
-        className="w-10 h-10 rounded-full backdrop-blur-[10px] border border-white/5 transition-opacity duration-300"
-        style={{ opacity }}
-      />
+      {/* 未激活：圆形隐藏按钮 */}
+      {!showBubble && (
+        <div
+          className={`w-10 h-10 rounded-full ${quality === 'LOW' || quality === 'ULTRA_LOW' ? 'backdrop-blur-sm' : 'backdrop-blur-[15px]'} bg-white/5 border border-white/5 transition-opacity duration-300 cursor-pointer`}
+          style={{ opacity }}
+          onClick={handleClick}
+        />
+      )}
 
-      {showMessage && (
-        <div className="absolute top-12 left-1/2 -translate-x-1/2 whitespace-nowrap
-                        bg-[rgba(255,250,245,0.95)] border-2 border-[#b8860b] rounded-lg
-                        text-[#800000] text-sm font-bold p-3
-                        shadow-[0_8px_30px_rgba(0,0,0,0.6)]
-                        animate-float">
-          特别鸣谢你制造更欢乐的我！
+      {/* 激活后：气泡在按钮原位显示（按钮化身为气泡） */}
+      {showBubble && (
+        <div>
+          <div
+            className={`
+              bg-gradient-to-br from-[rgba(255,250,245,0.98)] to-[rgba(255,240,230,0.95)]
+              border-2 border-[#ffd700] rounded-xl
+              text-[#800000] text-sm font-bold leading-relaxed
+              shadow-[0_8px_30px_rgba(0,0,0,0.6),0_0_20px_rgba(255,215,0,0.3)]
+              flex items-center justify-center text-center
+              backdrop-blur-sm
+              w-[220px] min-h-[80px] p-5
+              animate-float
+            `}
+          >
+            <div className="relative">
+              {displayText}
+              <div className="absolute -inset-2 bg-gradient-to-r from-[#ffd700]/20 to-[#ffaa00]/10 blur-xl -z-10 animate-pulse rounded-xl" />
+            </div>
+          </div>
         </div>
       )}
     </div>

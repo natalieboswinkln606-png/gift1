@@ -16,28 +16,33 @@ function formatTime(seconds: number): string {
 }
 
 export default function MusicPlayer({ audioEngine }: MusicPlayerProps) {
-  const { isPlaying, currentSong, volume, playlist, currentIndex } = useAudioStore()
+  // 细粒度 store 订阅：每个字段独立选择器，避免无关状态变化触发重渲染
+  const isPlaying = useAudioStore((s) => s.isPlaying)
+  const currentSong = useAudioStore((s) => s.currentSong)
+  const volume = useAudioStore((s) => s.volume)
+  const playlist = useAudioStore((s) => s.playlist)
+  const currentIndex = useAudioStore((s) => s.currentIndex)
   const [collapsed, setCollapsed] = useState(true)
+  const [showPlaylist, setShowPlaylist] = useState(false)
   const [progress, setProgress] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const progressBarRef = useRef<HTMLDivElement>(null)
 
-  // RAF-driven progress update
+  // 低频定时器驱动进度更新（250ms 间隔，无需 60fps 精度）
   useEffect(() => {
     if (!audioEngine || collapsed) return
-    let raf: number
     const update = () => {
       const current = audioEngine.getCurrentTime()
       const dur = audioEngine.getDuration()
       setProgress(dur > 0 ? current / dur : 0)
       setCurrentTime(current)
       setDuration(dur)
-      raf = requestAnimationFrame(update)
     }
-    raf = requestAnimationFrame(update)
-    return () => cancelAnimationFrame(raf)
+    update()
+    const id = setInterval(update, 250)
+    return () => clearInterval(id)
   }, [audioEngine, collapsed])
 
   const handleSeek = useCallback(
@@ -67,13 +72,29 @@ export default function MusicPlayer({ audioEngine }: MusicPlayerProps) {
     [audioEngine],
   )
 
+  const handlePlayTrack = useCallback(
+    (index: number) => {
+      if (!audioEngine) return
+      audioEngine.playSong(index)
+    },
+    [audioEngine],
+  )
+
+  const handleExpand = useCallback(() => setCollapsed(false), [])
+  const handleCollapse = useCallback(() => setCollapsed(true), [])
+  const handleTogglePlaylist = useCallback(() => setShowPlaylist((prev) => !prev), [])
+  const handlePrev = useCallback(() => audioEngine?.prev(), [audioEngine])
+  const handleTogglePlay = useCallback(() => audioEngine?.togglePlay(), [audioEngine])
+  const handleNext = useCallback(() => audioEngine?.next(), [audioEngine])
+  const handleUploadClick = useCallback(() => fileInputRef.current?.click(), [])
+
   if (!audioEngine) return null
 
   // Collapsed state — small floating orb
   if (collapsed) {
     return (
       <button
-        onClick={() => setCollapsed(false)}
+        onClick={handleExpand}
         className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full
                    bg-black/80 backdrop-blur-md border border-white/10
                    flex items-center justify-center
@@ -129,8 +150,30 @@ export default function MusicPlayer({ audioEngine }: MusicPlayerProps) {
             </p>
           )}
         </div>
+        {/* 播放列表切换按钮 */}
+        {playlist.length > 1 && (
+          <button
+            onClick={handleTogglePlaylist}
+            className={`w-7 h-7 rounded-full border flex items-center justify-center flex-shrink-0
+                       transition-colors duration-200
+                       ${showPlaylist
+                         ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                         : 'bg-white/5 border-white/10 text-white/40 hover:text-white/80 hover:bg-white/10'
+                       }`}
+            aria-label={showPlaylist ? 'Hide playlist' : 'Show playlist'}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="8" y1="6" x2="21" y2="6" />
+              <line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" />
+              <line x1="3" y1="6" x2="3.01" y2="6" />
+              <line x1="3" y1="12" x2="3.01" y2="12" />
+              <line x1="3" y1="18" x2="3.01" y2="18" />
+            </svg>
+          </button>
+        )}
         <button
-          onClick={() => setCollapsed(true)}
+          onClick={handleCollapse}
           className="w-7 h-7 rounded-full bg-white/5 border border-white/10
                      flex items-center justify-center flex-shrink-0
                      text-white/40 hover:text-white/80 hover:bg-white/10
@@ -142,6 +185,33 @@ export default function MusicPlayer({ audioEngine }: MusicPlayerProps) {
           </svg>
         </button>
       </div>
+
+      {/* 播放列表面板 */}
+      {showPlaylist && playlist.length > 0 && (
+        <div className="max-h-40 overflow-y-auto rounded-lg bg-white/5 border border-white/10">
+          {playlist.map((item, idx) => (
+            <button
+              key={`${item.url}-${idx}`}
+              onClick={() => handlePlayTrack(idx)}
+              className={`w-full px-3 py-2 text-left text-xs truncate
+                         transition-colors duration-150 flex items-center gap-2
+                         ${idx === currentIndex
+                           ? 'bg-amber-500/15 text-amber-300'
+                           : 'text-white/60 hover:bg-white/10 hover:text-white/90'
+                         }`}
+            >
+              <span className="w-4 flex-shrink-0 text-center">
+                {idx === currentIndex && isPlaying ? (
+                  <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                ) : (
+                  <span className="text-[10px] text-white/30">{idx + 1}</span>
+                )}
+              </span>
+              <span className="truncate">{item.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Progress bar */}
       <div className="flex flex-col gap-1">
@@ -176,7 +246,7 @@ export default function MusicPlayer({ audioEngine }: MusicPlayerProps) {
       <div className="flex items-center justify-center gap-3">
         {/* Prev */}
         <button
-          onClick={() => audioEngine.prev()}
+          onClick={handlePrev}
           className="w-8 h-8 rounded-full bg-white/5 border border-white/10
                      flex items-center justify-center
                      text-white/50 hover:text-white hover:bg-white/10
@@ -190,7 +260,7 @@ export default function MusicPlayer({ audioEngine }: MusicPlayerProps) {
 
         {/* Play/Pause */}
         <button
-          onClick={() => audioEngine.togglePlay()}
+          onClick={handleTogglePlay}
           className="w-10 h-10 rounded-full
                      bg-gradient-to-br from-amber-500 to-orange-500
                      flex items-center justify-center
@@ -212,7 +282,7 @@ export default function MusicPlayer({ audioEngine }: MusicPlayerProps) {
 
         {/* Next */}
         <button
-          onClick={() => audioEngine.next()}
+          onClick={handleNext}
           className="w-8 h-8 rounded-full bg-white/5 border border-white/10
                      flex items-center justify-center
                      text-white/50 hover:text-white hover:bg-white/10
@@ -291,7 +361,7 @@ export default function MusicPlayer({ audioEngine }: MusicPlayerProps) {
         aria-label="Upload audio files"
       />
       <button
-        onClick={() => fileInputRef.current?.click()}
+        onClick={handleUploadClick}
         className="w-full py-1.5 rounded-lg
                    bg-white/5 border border-dashed border-white/10
                    text-[11px] text-white/40 hover:text-white/70

@@ -1,4 +1,8 @@
-import * as THREE from 'three'
+import {
+  AdditiveBlending, BufferAttribute, BufferGeometry,
+  CanvasTexture, Color, Object3D, Points, ShaderMaterial,
+} from 'three'
+import { createRadialGradientTexture } from './textureFactory'
 
 // 借鉴 新建文本文档 - 副本.html 的5层外围星环
 // 马尔可夫链分布 + ShaderMaterial 驱动粒子运动
@@ -11,22 +15,16 @@ const LAYER_GROWTH = 2.5
 const SPEED_SCALE = 0.2
 const ANGLE_STEP_DEG = 40
 const DEG2RAD = Math.PI / 180
-const GOLD_COLOR = new THREE.Color(0xffd700)
+const GOLD_COLOR = new Color(0xffd700)
 
 /** 星环粒子纹理：柔和金色渐变 */
-function createGlowSprite(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
-  const ctx = canvas.getContext('2d')!
-  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
-  grad.addColorStop(0, 'rgba(255, 255, 255, 1)')
-  grad.addColorStop(0.15, 'rgba(255, 235, 180, 0.8)')
-  grad.addColorStop(0.5, 'rgba(100, 80, 0, 0.2)')
-  grad.addColorStop(1, 'rgba(0, 0, 0, 0)')
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, 64, 64)
-  return new THREE.CanvasTexture(canvas)
+function createGlowSprite(): CanvasTexture {
+  return createRadialGradientTexture(64, [
+    { offset: 0, color: 'rgba(255, 255, 255, 1)' },
+    { offset: 0.15, color: 'rgba(255, 235, 180, 0.8)' },
+    { offset: 0.5, color: 'rgba(100, 80, 0, 0.2)' },
+    { offset: 1, color: 'rgba(0, 0, 0, 0)' },
+  ])
 }
 
 /** 马尔可夫链分布：生成 CLUSTER/GAP/STRAY 三态可见性掩码 */
@@ -121,19 +119,20 @@ const RING_FRAGMENT_SHADER = `
 `
 
 interface RingData {
-  mesh: THREE.Points
-  material: THREE.ShaderMaterial
+  mesh: Points
+  material: ShaderMaterial
 }
 
 export class OrbitRings {
   private rings: RingData[] = []
-  private glowTex: THREE.CanvasTexture
+  private glowTex: CanvasTexture
+  private baseMaterial: ShaderMaterial  // 保存基础材质引用，dispose 时释放
 
-  constructor(scene: THREE.Scene) {
+  constructor(parent: Object3D, particlesPerRing = PARTICLES_PER_RING) {
     this.glowTex = createGlowSprite()
 
     // 基础材质模板
-    const baseMaterial = new THREE.ShaderMaterial({
+    const baseMaterial = new ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
         uSpeed: { value: 1.0 },
@@ -144,30 +143,32 @@ export class OrbitRings {
       vertexShader: RING_VERTEX_SHADER,
       fragmentShader: RING_FRAGMENT_SHADER,
       transparent: true,
-      blending: THREE.AdditiveBlending,
+      blending: AdditiveBlending,
       depthWrite: false,
     })
+    this.baseMaterial = baseMaterial
 
     // 5层环
     for (let i = 0; i < RING_COUNT; i++) {
       const angle = (i + 1) * ANGLE_STEP_DEG * DEG2RAD
       const speed = 1.0 + (Math.random() * 0.3 - 0.15)
-      const ring = this.createOrbitRing(baseMaterial, angle, speed, i)
-      scene.add(ring.mesh)
+      const ring = this.createOrbitRing(baseMaterial, angle, speed, i, particlesPerRing)
+      parent.add(ring.mesh)
       this.rings.push(ring)
     }
   }
 
   private createOrbitRing(
-    baseMat: THREE.ShaderMaterial,
+    baseMat: ShaderMaterial,
     rotAngle: number,
     speedOffset: number,
-    layerIndex: number
+    layerIndex: number,
+    particlesPerRing: number
   ): RingData {
-    const count = PARTICLES_PER_RING
+    const count = particlesPerRing
     const currentRadius = BASE_RADIUS + layerIndex * LAYER_GROWTH
 
-    const geometry = new THREE.BufferGeometry()
+    const geometry = new BufferGeometry()
     const positions = new Float32Array(count * 3)
     const angles = new Float32Array(count)
     const randoms = new Float32Array(count)
@@ -187,11 +188,11 @@ export class OrbitRings {
       offsets[i * 3 + 2] = r * Math.cos(phi)
     }
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    geometry.setAttribute('aAngle', new THREE.BufferAttribute(angles, 1))
-    geometry.setAttribute('aRandom', new THREE.BufferAttribute(randoms, 1))
-    geometry.setAttribute('aVisible', new THREE.BufferAttribute(visibles, 1))
-    geometry.setAttribute('aOffset', new THREE.BufferAttribute(offsets, 3))
+    geometry.setAttribute('position', new BufferAttribute(positions, 3))
+    geometry.setAttribute('aAngle', new BufferAttribute(angles, 1))
+    geometry.setAttribute('aRandom', new BufferAttribute(randoms, 1))
+    geometry.setAttribute('aVisible', new BufferAttribute(visibles, 1))
+    geometry.setAttribute('aOffset', new BufferAttribute(offsets, 3))
 
     const mat = baseMat.clone()
     // 共享不变的 uniform 引用，减少 GPU uniform upload
@@ -200,7 +201,8 @@ export class OrbitRings {
     mat.uniforms.uSpeed.value = SPEED_SCALE * speedOffset
     mat.uniforms.uRadius.value = currentRadius
 
-    const mesh = new THREE.Points(geometry, mat)
+    const mesh = new Points(geometry, mat)
+    mesh.frustumCulled = false  // 星环始终可见，跳过 frustum check
     mesh.rotation.x = rotAngle
     mesh.rotation.y = rotAngle
     mesh.rotation.z = rotAngle
@@ -226,6 +228,7 @@ export class OrbitRings {
 
   dispose(): void {
     this.glowTex.dispose()
+    this.baseMaterial.dispose()  // 释放基础材质
     for (const ring of this.rings) {
       ring.mesh.geometry.dispose()
       ring.material.dispose()

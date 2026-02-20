@@ -1,7 +1,17 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import * as THREE from 'three'
+import {
+  ACESFilmicToneMapping,
+  AmbientLight,
+  Color,
+  FogExp2,
+  HemisphereLight,
+  Mesh,
+  Raycaster,
+  Vector2,
+  WebGLRenderer,
+} from 'three'
 import type { UserConfig, SceneMode } from '@/types'
 import { useAppStore } from '@/stores/useAppStore'
 import type { SceneManager } from '@/lib/three/SceneManager'
@@ -12,7 +22,10 @@ import type { StarBuilder } from '@/lib/three/StarBuilder'
 import type { PhotoSystem } from '@/lib/three/PhotoSystem'
 import type { AudioEngine } from '@/lib/audio/AudioEngine'
 import type { SnowCanvas } from '@/lib/three/SnowCanvas'
+import type { PerformanceMonitor } from '@/lib/utils/PerformanceMonitor'
 
+import { useAnimationLoop } from '@/hooks/useAnimationLoop'
+import { detectQuality, getQualityPreset } from '@/lib/utils/QualityDetector'
 import SceneControls from '@/components/ui/SceneControls'
 import LoadingScreen from '@/components/ui/LoadingScreen'
 import MusicPlayer from '@/components/ui/MusicPlayer'
@@ -20,9 +33,10 @@ import MusicPlayer from '@/components/ui/MusicPlayer'
 interface ChristmasSceneProps {
   userId: string
   config: UserConfig
+  renderer: WebGLRenderer
 }
 
-export default function ChristmasScene({ userId, config }: ChristmasSceneProps) {
+export default function ChristmasScene({ userId, config, renderer }: ChristmasSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Three.js system refs
@@ -36,21 +50,76 @@ export default function ChristmasScene({ userId, config }: ChristmasSceneProps) 
 
   // SnowCanvas ref
   const snowCanvasRef = useRef<SnowCanvas | null>(null)
+  const perfMonRef = useRef<PerformanceMonitor | null>(null)
 
   // Raycaster for mouse picking
-  const raycasterRef = useRef(new THREE.Raycaster())
-  const mouseNDC = useRef(new THREE.Vector2())
+  const raycasterRef = useRef(new Raycaster())
+  const mouseNDC = useRef(new Vector2())
 
   const [loading, setLoading] = useState(true)
   const [currentMode, setCurrentMode] = useState<SceneMode>('TREE')
   const [drawingActive, setDrawingActive] = useState(false)
+  // 用 state 追踪 audioEngine 以触发重渲染，解决 ref 不触发重渲染导致 MusicPlayer 收到 null 的问题
+  const [audioReady, setAudioReady] = useState(false)
 
   // Track mouse drawing state via ref
   const mouseDrawingRef = useRef(false)
   // Track mode before photo activation (to restore on close)
   const modeBeforePhotoRef = useRef<SceneMode | null>(null)
   // Track previous activePhoto to detect changes in animation loop
-  const prevActivePhotoRef = useRef<THREE.Mesh | null>(null)
+  const prevActivePhotoRef = useRef<Mesh | null>(null)
+  const lastTimeRef = useRef(0)
+
+  // 动画循环（useAnimationLoop 自动处理 RAF + paused + 卸载清理）
+  useAnimationLoop(() => {
+    const sm = sceneManagerRef.current
+    const ps = particleSystemRef.current
+    const photos = photoSystemRef.current
+    const audio = audioEngineRef.current
+    const star = starBuilderRef.current
+    const stars = bgStarsRef.current
+    const bloom = selectiveBloomRef.current
+    if (!sm || !ps || !photos || !audio || !star || !stars || !bloom) return
+
+    const time = sm.clock.getElapsedTime()
+    const dt = time - lastTimeRef.current
+    lastTimeRef.current = time
+    const isTree = ps.state.mode === 'TREE'
+
+    // Auto-switch to SCATTER when a photo becomes active
+    const curActive = photos.activePhoto
+    const prevActive = prevActivePhotoRef.current
+    if (curActive && !prevActive) {
+      modeBeforePhotoRef.current = ps.state.mode as SceneMode
+      if (ps.state.mode !== 'SCATTER') {
+        ps.setTargetMode('SCATTER')
+        setCurrentMode('SCATTER')
+      }
+    } else if (!curActive && prevActive) {
+      const restoreMode = modeBeforePhotoRef.current
+      if (restoreMode && restoreMode !== ps.state.mode) {
+        ps.setTargetMode(restoreMode)
+        setCurrentMode(restoreMode)
+      }
+      modeBeforePhotoRef.current = null
+    }
+    prevActivePhotoRef.current = curActive
+
+    audio.update()
+    sm.controls.update()
+    ps.update(dt, time, audio)
+
+    // 运行时 FPS 监控
+    perfMonRef.current?.update(dt)
+
+    photos.update(time, isTree, sm.camera, sm.controls)
+    star.update(time, isTree, 85)
+    stars.update(time)
+
+    // Pass active photo as overlay so it renders after bloom (avoids glow bleed)
+    const overlayMeshes = photos.activePhoto ? [photos.activePhoto] : undefined
+    bloom.render(overlayMeshes)
+  })
 
   // ============================================================
   // Initialize Three.js scene + SnowCanvas
@@ -59,66 +128,111 @@ export default function ChristmasScene({ userId, config }: ChristmasSceneProps) 
     if (!containerRef.current) return
 
     let disposed = false
-    let rafId = 0
 
     async function initScene() {
       try {
-        const { SceneManager } = await import('@/lib/three/SceneManager')
-        const { ParticleSystem } = await import('@/lib/three/ParticleSystem')
-        const { SelectiveBloom } = await import('@/lib/three/SelectiveBloom')
-        const { BackgroundStars } = await import('@/lib/three/BackgroundStars')
-        const { StarBuilder } = await import('@/lib/three/StarBuilder')
-        const { PhotoSystem } = await import('@/lib/three/PhotoSystem')
-        const { AudioEngine } = await import('@/lib/audio/AudioEngine')
-        const { SnowCanvas } = await import('@/lib/three/SnowCanvas')
+        // 并行加载所有模块（消除串行 await 链，8 个 import 同时发起）
+        const [
+          { SceneManager },
+          { ParticleSystem },
+          { SelectiveBloom },
+          { BackgroundStars },
+          { StarBuilder },
+          { PhotoSystem },
+          { AudioEngine },
+          { SnowCanvas },
+        ] = await Promise.all([
+          import('@/lib/three/SceneManager'),
+          import('@/lib/three/ParticleSystem'),
+          import('@/lib/three/SelectiveBloom'),
+          import('@/lib/three/BackgroundStars'),
+          import('@/lib/three/StarBuilder'),
+          import('@/lib/three/PhotoSystem'),
+          import('@/lib/audio/AudioEngine'),
+          import('@/lib/three/SnowCanvas'),
+        ])
 
         if (disposed) return
 
         // Scene manager
-        const sm = new SceneManager(containerRef.current!)
-        sm.scene.background = new THREE.Color('#000510')
-        sm.scene.fog = new THREE.FogExp2(0x050202, 0.003)
+        const sm = new SceneManager(containerRef.current!, renderer)
+
+        // 防御性重置：确保共享 renderer 处于干净状态（上一个场景的 EffectComposer 可能残留 WebGL 状态）
+        renderer.setRenderTarget(null)
+        renderer.state.reset()
+        renderer.clear()
+
+        // 检测设备性能等级
+        const qualityLevel = detectQuality(sm.renderer)
+        const preset = getQualityPreset(qualityLevel)
+        // 质量等级日志（仅开发环境）
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`[ChristmasScene] 质量等级: ${qualityLevel}`, preset)
+        }
+
+        // 根据质量预设重设像素比
+        sm.renderer.setPixelRatio(Math.min(window.devicePixelRatio, preset.pixelRatioMax))
+
+        // 设置 toneMapping（共享 renderer 需要每个场景自行设置）
+        sm.renderer.toneMapping = ACESFilmicToneMapping
+        sm.renderer.toneMappingExposure = 0.9
+
+        sm.scene.background = new Color('#000510')
+        sm.scene.fog = new FogExp2(0x050202, 0.003)
         sm.camera.position.set(0, 40, 110)
         // Look at lower-third of tree (treeHeight=85, 85/3≈28)
         sm.controls.target.set(0, 28, 0)
         sceneManagerRef.current = sm
+        sm.controls.autoRotate = false  // 圣诞场景关闭相机自转
 
         // Lights
-        const ambient = new THREE.AmbientLight(0x112244, 0.3)
+        const ambient = new AmbientLight(0x112244, 0.3)
         sm.scene.add(ambient)
-        const hemi = new THREE.HemisphereLight(0x001133, 0x000000, 0.4)
+        const hemi = new HemisphereLight(0x001133, 0x000000, 0.4)
         sm.scene.add(hemi)
 
-        // Particle system (45000 particles)
-        const ps = new ParticleSystem(sm.scene, undefined, config.name)
+        // Particle system
+        const ps = new ParticleSystem(sm.scene, { count: preset.particleCount, trunkCount: preset.trunkCount }, config.name)
         particleSystemRef.current = ps
 
         // Selective bloom
-        const bloom = new SelectiveBloom(sm.renderer, sm.scene, sm.camera)
+        const bloom = new SelectiveBloom(sm.renderer, sm.scene, sm.camera, preset.bloomScale)
         selectiveBloomRef.current = bloom
         sm.onResize((w, h) => bloom.resize(w, h))
 
         // Background stars
-        const stars = new BackgroundStars(sm.scene, 8000)
+        const stars = new BackgroundStars(sm.scene, preset.bgStarCount)
         bgStarsRef.current = stars
 
         // Tree-top star
         const star = new StarBuilder(sm.scene)
         starBuilderRef.current = star
 
-        // Photo system
+        // Photo system + Audio engine — 并行加载照片和音乐列表（消除串行网络等待）
         const photos = new PhotoSystem(sm.scene)
-        await photos.loadFromConfig(config, userId)
+        const audio = new AudioEngine()
+
+        const [, musicResult] = await Promise.all([
+          photos.loadFromConfig(config, userId),
+          fetch('/music.json')
+            .then(r => r.ok ? r.json() as Promise<Array<{ name: string; url: string }>> : null)
+            .catch(() => null),
+        ])
+
         ps.setPhotoGroup(photos.photoGroup)
         photoSystemRef.current = photos
 
-        // Audio engine
-        const audio = new AudioEngine()
-        audio.setPlaylist([{ name: 'Harbor', url: '/music/Harbor.mp3' }])
+        if (musicResult && musicResult.length > 0) {
+          audio.setPlaylist(musicResult)
+        } else {
+          audio.setPlaylist([{ name: 'Harbor', url: '/music/Harbor.mp3' }])
+        }
         audioEngineRef.current = audio
+        setAudioReady(true)
 
-        // SnowCanvas (painting system)
-        const snow = new SnowCanvas(containerRef.current!)
+        // SnowCanvas (painting system) — 低端设备降低 backdrop-filter blur
+        const blurAmount = qualityLevel === 'ULTRA_LOW' ? 0 : qualityLevel === 'LOW' ? 6 : 15
+        const snow = new SnowCanvas(containerRef.current!, blurAmount)
         snow.setOnComplete(() => {
           setDrawingActive(false)
           setCurrentMode(ps.state.mode)
@@ -126,54 +240,22 @@ export default function ChristmasScene({ userId, config }: ChristmasSceneProps) 
         })
         snowCanvasRef.current = snow
 
-        if (disposed) return
+        // 运行时 FPS 监控（ULTRA_LOW 设备跳过动态调整）
+        const { PerformanceMonitor } = await import('@/lib/utils/PerformanceMonitor')
+        const perfMon = new PerformanceMonitor(qualityLevel)
+        perfMon.setOnQualityChange((q) => {
+          useAppStore.getState().setQuality(q)
+        })
+        perfMonRef.current = perfMon
 
-        // 动画循环
-        let lastTime = 0
-        const animate = () => {
-          if (disposed) return
-          rafId = requestAnimationFrame(animate)
-
-          if (!sceneManagerRef.current) return
-          const time = sm.clock.getElapsedTime()
-          const dt = time - lastTime
-          lastTime = time
-          const isTree = ps.state.mode === 'TREE'
-
-          // Auto-switch to SCATTER when a photo becomes active
-          const curActive = photos.activePhoto
-          const prevActive = prevActivePhotoRef.current
-          if (curActive && !prevActive) {
-            // Photo just activated — save current mode and switch to SCATTER
-            modeBeforePhotoRef.current = ps.state.mode as SceneMode
-            if (ps.state.mode !== 'SCATTER') {
-              ps.setTargetMode('SCATTER')
-              setCurrentMode('SCATTER')
-            }
-          } else if (!curActive && prevActive) {
-            // Photo just closed — restore previous mode
-            const restoreMode = modeBeforePhotoRef.current
-            if (restoreMode && restoreMode !== ps.state.mode) {
-              ps.setTargetMode(restoreMode)
-              setCurrentMode(restoreMode)
-            }
-            modeBeforePhotoRef.current = null
-          }
-          prevActivePhotoRef.current = curActive
-
-          audio.update()
-          sm.controls.update()
-          ps.update(dt, time, audio)
-          photos.update(time, isTree, sm.camera, sm.controls)
-          star.update(time, isTree, 85)
-          stars.update(time)
-
-          // Pass active photo as overlay so it renders after bloom (avoids glow bleed)
-          const overlayMeshes = photos.activePhoto ? [photos.activePhoto] : undefined
-          bloom.render(overlayMeshes)
+        if (disposed) {
+          // 异步加载期间组件已卸载，清理刚创建但未赋给 ref 的对象
+          snow.dispose()
+          photos.dispose()
+          audio.dispose()
+          return
         }
 
-        rafId = requestAnimationFrame(animate)
         setLoading(false)
       } catch (err) {
         console.error('[ChristmasScene] Failed to init:', err)
@@ -185,7 +267,6 @@ export default function ChristmasScene({ userId, config }: ChristmasSceneProps) 
 
     return () => {
       disposed = true
-      cancelAnimationFrame(rafId)
 
       snowCanvasRef.current?.dispose()
       snowCanvasRef.current = null
@@ -414,11 +495,11 @@ export default function ChristmasScene({ userId, config }: ChristmasSceneProps) 
     <>
       <LoadingScreen visible={loading} />
 
-      {/* Three.js container */}
-      <div ref={containerRef} className="w-full h-full" />
+      {/* Three.js container — absolute 定位确保填满父容器并接收 OrbitControls 事件 */}
+      <div ref={containerRef} className="absolute inset-0" />
 
-      {/* Music player */}
-      <MusicPlayer audioEngine={audioEngineRef.current} />
+      {/* Music player — audioReady 触发重渲染确保 ref 非 null */}
+      {audioReady && <MusicPlayer audioEngine={audioEngineRef.current} />}
 
       {/* Scene controls */}
       <SceneControls />

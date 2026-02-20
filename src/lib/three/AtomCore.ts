@@ -1,4 +1,10 @@
-import * as THREE from 'three'
+import {
+  AdditiveBlending, BufferGeometry, CanvasTexture,
+  Float32BufferAttribute, Group, Material, Object3D,
+  OctahedronGeometry, Points, PointsMaterial, Sprite,
+  SpriteMaterial, Vector3, WireframeGeometry,
+} from 'three'
+import { createRadialGradientTexture } from './textureFactory'
 
 // 借鉴 新建文本文档.html 的中心球体与牢笼
 // 中心球体：1200粒子球面均匀分布 + 发光精灵
@@ -7,34 +13,22 @@ import * as THREE from 'three'
 // --- 纹理工厂 ---
 
 /** 核心粒子纹理：柔和径向渐变 */
-function createCoreParticleTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
-  const ctx = canvas.getContext('2d')!
-  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
-  grad.addColorStop(0, 'rgba(255,255,255,1)')
-  grad.addColorStop(0.3, 'rgba(255,220,100,0.8)')
-  grad.addColorStop(0.6, 'rgba(255,150,50,0.2)')
-  grad.addColorStop(1, 'rgba(0,0,0,0)')
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, 64, 64)
-  return new THREE.CanvasTexture(canvas)
+function createCoreParticleTexture(): CanvasTexture {
+  return createRadialGradientTexture(64, [
+    { offset: 0, color: 'rgba(255,255,255,1)' },
+    { offset: 0.3, color: 'rgba(255,220,100,0.8)' },
+    { offset: 0.6, color: 'rgba(255,150,50,0.2)' },
+    { offset: 1, color: 'rgba(0,0,0,0)' },
+  ])
 }
 
 /** 牢笼粒子纹理：纯白径向渐变 */
-function createCageParticleTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
-  const ctx = canvas.getContext('2d')!
-  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
-  grad.addColorStop(0, 'rgba(255,255,255,1)')
-  grad.addColorStop(0.4, 'rgba(255,255,255,0.8)')
-  grad.addColorStop(1, 'rgba(0,0,0,0)')
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, 64, 64)
-  return new THREE.CanvasTexture(canvas)
+function createCageParticleTexture(): CanvasTexture {
+  return createRadialGradientTexture(64, [
+    { offset: 0, color: 'rgba(255,255,255,1)' },
+    { offset: 0.4, color: 'rgba(255,255,255,0.8)' },
+    { offset: 1, color: 'rgba(0,0,0,0)' },
+  ])
 }
 
 // --- 配置常量 ---
@@ -53,24 +47,24 @@ const CAGE_PARTICLE_SIZE = 0.375
 const CAGE_COLOR = 0xffd700
 
 export class AtomCore {
-  private nucleusGroup: THREE.Group
-  private nucleusParticles: THREE.Points
-  private coreGlow: THREE.Sprite
-  private cage: THREE.Points
-  private coreTex: THREE.CanvasTexture
-  private cageTex: THREE.CanvasTexture
+  private nucleusGroup: Group
+  private nucleusParticles: Points
+  private coreGlow: Sprite
+  private cage: Points
+  private coreTex: CanvasTexture
+  private cageTex: CanvasTexture
 
-  constructor(scene: THREE.Scene) {
+  constructor(parent: Object3D, coreParticleCount = CORE_PARTICLE_COUNT) {
     this.coreTex = createCoreParticleTexture()
     this.cageTex = createCageParticleTexture()
 
     // --- 核心球体 ---
-    this.nucleusGroup = new THREE.Group()
+    this.nucleusGroup = new Group()
 
-    // 1200粒子球面均匀分布
-    const nucleusGeo = new THREE.BufferGeometry()
+    // 粒子球面均匀分布
+    const nucleusGeo = new BufferGeometry()
     const positions: number[] = []
-    for (let i = 0; i < CORE_PARTICLE_COUNT; i++) {
+    for (let i = 0; i < coreParticleCount; i++) {
       const r = CORE_RADIUS * Math.cbrt(Math.random())
       const theta = Math.random() * Math.PI * 2
       const phi = Math.acos(2 * Math.random() - 1)
@@ -80,50 +74,52 @@ export class AtomCore {
         r * Math.cos(phi)
       )
     }
-    nucleusGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    nucleusGeo.setAttribute('position', new Float32BufferAttribute(positions, 3))
 
-    const nucleusMat = new THREE.PointsMaterial({
+    const nucleusMat = new PointsMaterial({
       color: CORE_COLOR,
       size: CORE_PARTICLE_SIZE,
       map: this.coreTex,
       transparent: true,
       opacity: 0.85,
-      blending: THREE.AdditiveBlending,
+      blending: AdditiveBlending,
       depthWrite: false,
     })
-    this.nucleusParticles = new THREE.Points(nucleusGeo, nucleusMat)
+    this.nucleusParticles = new Points(nucleusGeo, nucleusMat)
+    this.nucleusParticles.frustumCulled = false  // 核心粒子始终可见
     this.nucleusGroup.add(this.nucleusParticles)
 
     // 发光精灵
-    const spriteMat = new THREE.SpriteMaterial({
+    const spriteMat = new SpriteMaterial({
       map: this.coreTex,
       color: CORE_GLOW_COLOR,
       transparent: true,
       opacity: 0.9,
-      blending: THREE.AdditiveBlending,
+      blending: AdditiveBlending,
     })
-    this.coreGlow = new THREE.Sprite(spriteMat)
+    this.coreGlow = new Sprite(spriteMat)
     this.coreGlow.scale.set(CORE_GLOW_SCALE, CORE_GLOW_SCALE, 1)
     this.nucleusGroup.add(this.coreGlow)
 
-    scene.add(this.nucleusGroup)
+    parent.add(this.nucleusGroup)
 
     // --- 128面多面体牢笼 ---
     this.cage = this.createPolyhedralCage()
-    scene.add(this.cage)
+    this.cage.frustumCulled = false  // 牢笼始终可见
+    parent.add(this.cage)
   }
 
   /** 借鉴源文件1的牢笼生成逻辑：线框边采样+抖动+堆叠 */
-  private createPolyhedralCage(): THREE.Points {
-    const baseGeo = new THREE.OctahedronGeometry(CAGE_GEOMETRY_RADIUS, CAGE_GEOMETRY_DETAIL)
-    const wireGeo = new THREE.WireframeGeometry(baseGeo)
+  private createPolyhedralCage(): Points {
+    const baseGeo = new OctahedronGeometry(CAGE_GEOMETRY_RADIUS, CAGE_GEOMETRY_DETAIL)
+    const wireGeo = new WireframeGeometry(baseGeo)
     const linePositions = wireGeo.attributes.position.array
 
     const particlePositions: number[] = []
     // 复用临时 Vector3 避免循环内大量分配
-    const start = new THREE.Vector3()
-    const end = new THREE.Vector3()
-    const basePoint = new THREE.Vector3()
+    const start = new Vector3()
+    const end = new Vector3()
+    const basePoint = new Vector3()
 
     for (let i = 0; i < linePositions.length; i += 6) {
       start.set(linePositions[i], linePositions[i + 1], linePositions[i + 2])
@@ -150,16 +146,16 @@ export class AtomCore {
       }
     }
 
-    const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(particlePositions, 3))
+    const geometry = new BufferGeometry()
+    geometry.setAttribute('position', new Float32BufferAttribute(particlePositions, 3))
 
-    const material = new THREE.PointsMaterial({
+    const material = new PointsMaterial({
       color: CAGE_COLOR,
       size: CAGE_PARTICLE_SIZE,
       map: this.cageTex,
       transparent: true,
       opacity: 1.0,
-      blending: THREE.AdditiveBlending,
+      blending: AdditiveBlending,
       depthWrite: false,
     })
 
@@ -167,7 +163,7 @@ export class AtomCore {
     baseGeo.dispose()
     wireGeo.dispose()
 
-    return new THREE.Points(geometry, material)
+    return new Points(geometry, material)
   }
 
   get visible(): boolean {
@@ -199,10 +195,10 @@ export class AtomCore {
 
   dispose(): void {
     this.nucleusParticles.geometry.dispose()
-    ;(this.nucleusParticles.material as THREE.Material).dispose()
+    ;(this.nucleusParticles.material as Material).dispose()
     this.coreGlow.material.dispose()
     this.cage.geometry.dispose()
-    ;(this.cage.material as THREE.Material).dispose()
+    ;(this.cage.material as Material).dispose()
     this.coreTex.dispose()
     this.cageTex.dispose()
     this.nucleusGroup.parent?.remove(this.nucleusGroup)

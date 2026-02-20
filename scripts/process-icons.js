@@ -4,6 +4,15 @@ const path = require('path')
 
 async function processIcon(inputPath, outputPath) {
   const image = sharp(inputPath)
+  const metadata = await image.metadata()
+  
+  // 如果已经是 PNG 且有 alpha 通道，检查是否需要重新处理
+  if (metadata.format === 'png' && metadata.hasAlpha) {
+    // 读取现有 PNG，检查角落是否有背景色
+    const { data, info } = await image.raw().toBuffer({ resolveWithObject: true })
+    // ... 继续处理
+  }
+  
   const { data, info } = await image.raw().toBuffer({ resolveWithObject: true })
 
   // Sample 4 corners (5x5 pixel blocks) to detect background color
@@ -89,20 +98,19 @@ async function processIcon(inputPath, outputPath) {
 }
 
 async function main() {
-  const sourceDir = path.join(__dirname, '..', '图标')
-  const outputDir = path.join(__dirname, '..', 'public', 'icons')
+  const sourceDir = path.join(__dirname, '..', 'public', 'icons')
+  
+  // 支持 PNG 和 JPG 源文件
+  const sourceFiles = fs.readdirSync(sourceDir).filter((f) => f.endsWith('.png') || f.endsWith('.jpg')).sort()
+  console.log(`Found ${sourceFiles.length} source icons to process\n`)
 
-  const sourceFiles = fs.readdirSync(sourceDir).filter((f) => f.endsWith('.jpg')).sort()
-  console.log(`Found ${sourceFiles.length} source icons\n`)
-
-  for (let i = 0; i < sourceFiles.length; i++) {
-    const inputPath = path.join(sourceDir, sourceFiles[i])
-    const outputPath = path.join(outputDir, `icon-${String(i + 1).padStart(2, '0')}.png`)
-    console.log(`Processing ${sourceFiles[i]}...`)
-    await processIcon(inputPath, outputPath)
+  for (const sourceFile of sourceFiles) {
+    const inputPath = path.join(sourceDir, sourceFile)
+    console.log(`Processing ${sourceFile}...`)
+    await processIcon(inputPath, inputPath) // 原地覆盖处理
   }
 
-  console.log(`\n✓ All ${sourceFiles.length} icons processed!`)
+  console.log(`\n✓ All ${sourceFiles.length} icons processed with background removal!`)
 }
 
 main().catch(console.error)

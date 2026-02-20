@@ -64,8 +64,16 @@ class Rocket {
       if (this.y <= this.targetY) this.explode()
     } else {
       for (const p of this.particles) p.update()
-      this.particles = this.particles.filter((p) => p.alpha > 0)
-      if (this.particles.length === 0) this.dead = true
+      // 原地压缩替代 filter()，消除 GC 压力
+      let write = 0
+      for (let i = 0; i < this.particles.length; i++) {
+        if (this.particles[i].alpha > 0) {
+          if (write !== i) this.particles[write] = this.particles[i]
+          write++
+        }
+      }
+      this.particles.length = write
+      if (write === 0) this.dead = true
     }
   }
 
@@ -154,7 +162,15 @@ export class FireworkSystem {
       rocket.update()
       rocket.draw(ctx)
     }
-    this.rockets = this.rockets.filter(r => !r.dead)
+    // 原地压缩替代 filter()，消除 GC 压力
+    let writeIdx = 0
+    for (let i = 0; i < this.rockets.length; i++) {
+      if (!this.rockets[i].dead) {
+        if (writeIdx !== i) this.rockets[writeIdx] = this.rockets[i]
+        writeIdx++
+      }
+    }
+    this.rockets.length = writeIdx
   }
 
   stop(): void {

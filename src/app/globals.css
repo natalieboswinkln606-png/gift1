@@ -15,6 +15,13 @@ body {
   color: rgb(var(--foreground-rgb));
   user-select: none;
   -webkit-user-select: none;
+  contain: layout style;
+}
+
+/* GPU 合成层提示：减少 canvas 重绘时的 layout 计算 */
+canvas {
+  will-change: transform;
+  contain: strict;
 }
 
 * {

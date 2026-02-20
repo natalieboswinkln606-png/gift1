@@ -1,4 +1,10 @@
-import * as THREE from 'three'
+import {
+  CanvasTexture, DoubleSide, Group, LinearFilter,
+  Material, Mesh, MeshBasicMaterial, NormalBlending,
+  RepeatWrapping, Scene, SphereGeometry, TorusGeometry,
+  WebGLRenderer,
+} from 'three'
+import { BLOOM_LAYER } from './SelectiveBloom'
 
 // 球面弧形光幕 + Canvas滚动文字 + 底部轨道线
 // 内容：实时日期时间 + 用户名 + 祝福语
@@ -8,77 +14,104 @@ const SCREEN_RADIUS = 20
 const SCREEN_HEIGHT = 0.08
 const SCROLL_SPEED = 0.03
 const PRIMARY_COLOR = 0xffaa00
-const FONT_SIZE = 28
+const FONT_SIZE = 32  // 缩小 1/3（48→32），字幕条字体更精致
 const TILT_Z_DEG = 30
 
+/** 可选配置，用于自定义字幕条参数（不传则使用默认值，行为与原版完全一致） */
+export interface SubtitleScreenConfig {
+  radius?: number        // 默认 20
+  screenHeight?: number  // 默认 0.08
+  tiltZDeg?: number      // 默认 30
+  yOffset?: number       // 默认 0
+  enableBloom?: boolean  // 默认 false
+  fontSize?: number      // 默认 17
+  contentFn?: (userName: string, blessing: string) => string  // 自定义内容生成函数
+  initialVisible?: boolean  // 默认 true
+}
+
 export class SubtitleScreen {
-  private group: THREE.Group
+  private group: Group
   private textCanvas: HTMLCanvasElement
   private textCtx: CanvasRenderingContext2D
-  private textTexture: THREE.CanvasTexture
-  private screenMesh: THREE.Mesh
-  private bottomRail: THREE.Mesh
+  private textTexture: CanvasTexture
+  private screenMesh: Mesh
+  private bottomRail: Mesh
   private userName: string
   private blessing: string
   private lastDrawnSecond = -1  // 降频：仅秒数变化时重绘Canvas
+  private contentFn?: (userName: string, blessing: string) => string
+  private fontSize: number
 
-  constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer, userName?: string, blessing?: string) {
+  constructor(scene: Scene, renderer: WebGLRenderer, userName?: string, blessing?: string, config?: SubtitleScreenConfig) {
     this.userName = userName || ''
     this.blessing = blessing || '愿每一秒的流转，都闪烁星辰之光。'
-    this.group = new THREE.Group()
+    this.contentFn = config?.contentFn
+    this.fontSize = config?.fontSize ?? FONT_SIZE
+    this.group = new Group()
 
-    // --- Canvas 纹理 ---
+    const radius = config?.radius ?? SCREEN_RADIUS
+    const screenHeight = config?.screenHeight ?? SCREEN_HEIGHT
+    const tiltZDeg = config?.tiltZDeg ?? TILT_Z_DEG
+
+    // --- Canvas 纹理（低端设备使用较小尺寸）---
     this.textCanvas = document.createElement('canvas')
-    this.textCanvas.width = 4096
-    this.textCanvas.height = 128
+    this.textCanvas.width = 2048   // 从 4096 降到 2048，减少 75% 纹理内存
+    this.textCanvas.height = 64    // 从 128 降到 64
     this.textCtx = this.textCanvas.getContext('2d')!
 
-    this.textTexture = new THREE.CanvasTexture(this.textCanvas)
-    this.textTexture.wrapS = THREE.RepeatWrapping
-    this.textTexture.anisotropy = renderer.capabilities.getMaxAnisotropy()
-    this.textTexture.minFilter = THREE.LinearFilter
-    this.textTexture.magFilter = THREE.LinearFilter
+    this.textTexture = new CanvasTexture(this.textCanvas)
+    this.textTexture.wrapS = RepeatWrapping
+    this.textTexture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy())  // 限制 anisotropy
+    this.textTexture.minFilter = LinearFilter
+    this.textTexture.magFilter = LinearFilter
 
     // --- 球面弧形光幕 ---
-    const phiStart = Math.PI / 2 - SCREEN_HEIGHT / 2
-    const screenGeo = new THREE.SphereGeometry(
-      SCREEN_RADIUS, 128, 32,
+    const phiStart = Math.PI / 2 - screenHeight / 2
+    const screenGeo = new SphereGeometry(
+      radius, 64, 16,  // 从 128,32 降到 64,16，减少 75% 顶点数
       0, Math.PI * 2,
-      phiStart, SCREEN_HEIGHT
+      phiStart, screenHeight
     )
 
-    const screenMat = new THREE.MeshBasicMaterial({
+    const screenMat = new MeshBasicMaterial({
       map: this.textTexture,
       transparent: true,
       opacity: 1.0,
-      side: THREE.DoubleSide,
-      blending: THREE.NormalBlending,
+      side: DoubleSide,
+      blending: NormalBlending,
       depthWrite: false,
     })
 
-    this.screenMesh = new THREE.Mesh(screenGeo, screenMat)
+    this.screenMesh = new Mesh(screenGeo, screenMat)
+    if (config?.enableBloom) {
+      this.screenMesh.layers.enable(BLOOM_LAYER)
+    }
     this.group.add(this.screenMesh)
 
     // --- 底部静态轨道线 ---
-    const railPhi = phiStart + SCREEN_HEIGHT
-    const railRadius = SCREEN_RADIUS * Math.sin(railPhi)
-    const railY = SCREEN_RADIUS * Math.cos(railPhi)
+    const railPhi = phiStart + screenHeight
+    const railRadius = radius * Math.sin(railPhi)
+    const railY = radius * Math.cos(railPhi)
 
-    const railGeo = new THREE.TorusGeometry(railRadius, 0.02, 16, 128)
-    const railMat = new THREE.MeshBasicMaterial({
+    const railGeo = new TorusGeometry(railRadius, 0.02, 16, 128)
+    const railMat = new MeshBasicMaterial({
       color: PRIMARY_COLOR,
       opacity: 0.7,
       transparent: true,
     })
-    this.bottomRail = new THREE.Mesh(railGeo, railMat)
+    this.bottomRail = new Mesh(railGeo, railMat)
     this.bottomRail.rotation.x = Math.PI / 2
     this.bottomRail.position.y = railY
     this.group.add(this.bottomRail)
 
-    // Z轴30度倾斜
+    // Z轴倾斜 + 可选 Y 偏移
     this.group.rotation.x = 0
     this.group.rotation.y = 0
-    this.group.rotation.z = TILT_Z_DEG * (Math.PI / 180)
+    this.group.rotation.z = tiltZDeg * (Math.PI / 180)
+    this.group.position.y = config?.yOffset ?? 0
+
+    // 初始可见性
+    this.group.visible = config?.initialVisible ?? true
 
     scene.add(this.group)
 
@@ -120,18 +153,19 @@ export class SubtitleScreen {
     ctx.strokeStyle = 'rgba(255, 170, 0, 0.4)'
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.moveTo(0, h - 10)
-    ctx.lineTo(w, h - 10)
+    ctx.moveTo(0, h - 4)
+    ctx.lineTo(w, h - 4)
     ctx.stroke()
 
     // 绘制文字
     ctx.fillStyle = '#ffaa00'
-    ctx.font = `bold ${FONT_SIZE}px "Courier New", monospace`
+    ctx.font = `bold ${this.fontSize}px "Courier New", monospace`
     ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'
 
-    const dateTime = this.formatDateTime()
-    const content = `  ${dateTime}  |  ${this.userName}  |  ${this.blessing}  |  `
+    const content = this.contentFn
+      ? this.contentFn(this.userName, this.blessing)
+      : `  ${this.formatDateTime()}  |  ${this.userName}  |  ${this.blessing}  |  `
     const textWidth = ctx.measureText(content).width
 
     let xPos = 0
@@ -158,10 +192,13 @@ export class SubtitleScreen {
 
   dispose(): void {
     this.screenMesh.geometry.dispose()
-    ;(this.screenMesh.material as THREE.Material).dispose()
+    ;(this.screenMesh.material as Material).dispose()
     this.bottomRail.geometry.dispose()
-    ;(this.bottomRail.material as THREE.Material).dispose()
+    ;(this.bottomRail.material as Material).dispose()
     this.textTexture.dispose()
+    // 释放 Canvas 内存
+    this.textCanvas.width = 0
+    this.textCanvas.height = 0
     this.group.parent?.remove(this.group)
   }
 }

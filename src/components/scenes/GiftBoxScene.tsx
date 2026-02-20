@@ -1,15 +1,18 @@
 'use client'
 
 import { useEffect, useRef, useCallback } from 'react'
+import { WebGLRenderer } from 'three'
 import { useAppStore } from '@/stores/useAppStore'
 import type { UserConfig } from '@/types'
+import { getPointerCoords } from '@/lib/utils/pointerUtils'
 
 interface GiftBoxSceneProps {
   userId: string
   config: UserConfig
+  renderer: WebGLRenderer
 }
 
-export default function GiftBoxScene({ userId, config }: GiftBoxSceneProps) {
+export default function GiftBoxScene({ userId, config, renderer }: GiftBoxSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const managerRef = useRef<import('@/lib/three/GiftBoxSceneManager').GiftBoxSceneManager | null>(null)
   const openedRef = useRef<boolean>(false)
@@ -34,10 +37,12 @@ export default function GiftBoxScene({ userId, config }: GiftBoxSceneProps) {
 
     import('@/lib/three/GiftBoxSceneManager').then(({ GiftBoxSceneManager }) => {
       if (disposed || !containerRef.current) return
-      const mgr = new GiftBoxSceneManager(containerRef.current)
+      const mgr = new GiftBoxSceneManager(containerRef.current, renderer)
       mgr.init()
       mgr.animate()
       managerRef.current = mgr
+      // 预热下一场景 chunk：礼盒动画期间并行下载 WelcomeScene
+      import('@/components/scenes/WelcomeScene')
     })
 
     return () => {
@@ -51,15 +56,9 @@ export default function GiftBoxScene({ userId, config }: GiftBoxSceneProps) {
     const mgr = managerRef.current
     if (!mgr || openedRef.current) return
 
-    let clientX: number, clientY: number
-    if ('touches' in e) {
-      if (!e.touches.length) return
-      clientX = e.touches[0].clientX
-      clientY = e.touches[0].clientY
-    } else {
-      clientX = e.clientX
-      clientY = e.clientY
-    }
+    const coords = getPointerCoords(e)
+    if (!coords) return
+    const { clientX, clientY } = coords
 
     // 参考HTML: mouse.x = (e.clientX/window.innerWidth)*2-1; mouse.y = -(e.clientY/window.innerHeight)*2+1
     const ndcX = (clientX / window.innerWidth) * 2 - 1

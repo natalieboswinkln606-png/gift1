@@ -1,6 +1,25 @@
-import * as THREE from 'three'
+import {
+  DoubleSide,
+  Group,
+  Material,
+  MathUtils,
+  Mesh,
+  MeshBasicMaterial,
+  NoToneMapping,
+  Object3D,
+  PerspectiveCamera,
+  PlaneGeometry,
+  Raycaster,
+  Scene,
+  SRGBColorSpace,
+  Texture,
+  TextureLoader,
+  Vector2,
+  WebGLRenderer,
+} from 'three'
 import gsap from 'gsap'
 import { getRandomBlessing, getRandomBlessings } from '@/data/blessings'
+import { useAppStore } from '@/stores/useAppStore'
 
 /** Layout config: 6 inner + 9 outer = 15 icons (cycling 9 source PNGs) */
 const INNER_COUNT = 6
@@ -13,79 +32,47 @@ export class WelcomeSceneManager {
   onSpriteHover: ((text: string, screenX: number, screenY: number) => void) | null = null
   onSpriteLeave: (() => void) | null = null
 
-  private scene: THREE.Scene
-  private camera: THREE.PerspectiveCamera
-  private renderer: THREE.WebGLRenderer
+  private scene: Scene
+  private camera: PerspectiveCamera
+  private renderer: WebGLRenderer
   private container: HTMLElement
   private animationId: number | null = null
-  private raycaster: THREE.Raycaster
-  private mouse: THREE.Vector2
+  private raycaster: Raycaster
+  private mouse: Vector2
 
-  private iconGroup: THREE.Group
-  private iconGroups: THREE.Group[] = []
+  private iconGroup: Group
+  private iconGroups: Group[] = []
   private blessings: string[] = []
-  private activeIcon: THREE.Group | null = null
+  private activeIcon: Group | null = null
   private startTime = 0
   private disposed = false
   private exitTimeoutId: ReturnType<typeof setTimeout> | null = null
   private resizeTimer: ReturnType<typeof setTimeout> | null = null
+  private sharedGeometry: PlaneGeometry | null = null
 
-  // Enhanced systems
-  private pointLight1!: THREE.PointLight
-  private pointLight2!: THREE.PointLight
-
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, renderer: WebGLRenderer) {
     this.container = container
-    this.raycaster = new THREE.Raycaster()
-    this.mouse = new THREE.Vector2()
+    this.raycaster = new Raycaster()
+    this.mouse = new Vector2()
 
-    this.scene = new THREE.Scene()
+    this.scene = new Scene()
 
     const w = window.innerWidth
     const h = window.innerHeight
-    this.camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100)
+    this.camera = new PerspectiveCamera(60, w / h, 0.1, 100)
     this.camera.position.set(0, 0, 6)
     this.camera.lookAt(0, 0, 0)
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-    this.renderer.setSize(w, h)
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    // 使用外部传入的共享 renderer，不自行创建
+    this.renderer = renderer
+    // 重置 renderer 状态以适配当前场景
+    this.renderer.toneMapping = NoToneMapping
+    this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.setClearColor(0x000000, 0)
-    // Disable tone mapping to prevent color shift on icon textures
-    this.renderer.toneMapping = THREE.NoToneMapping
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace
-    this.renderer.domElement.style.position = 'absolute'
-    this.renderer.domElement.style.top = '0'
-    this.renderer.domElement.style.left = '0'
-    this.renderer.domElement.style.zIndex = '5'
-    this.renderer.domElement.style.pointerEvents = 'none'
-    container.appendChild(this.renderer.domElement)
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false)
 
-    this.iconGroup = new THREE.Group()
+    this.iconGroup = new Group()
     this.scene.add(this.iconGroup)
-
-    // --- Enhanced 6-light system ---
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.5))
-
-    const keyLight = new THREE.DirectionalLight(0xfff5e0, 0.8)
-    keyLight.position.set(5, 8, 6)
-    this.scene.add(keyLight)
-
-    const fillLight = new THREE.DirectionalLight(0x88ccff, 0.3)
-    fillLight.position.set(-4, 3, -5)
-    this.scene.add(fillLight)
-
-    const rimLight = new THREE.DirectionalLight(0xffd700, 0.4)
-    rimLight.position.set(0, -3, -8)
-    this.scene.add(rimLight)
-
-    this.pointLight1 = new THREE.PointLight(0xffd700, 0.6, 15)
-    this.pointLight1.position.set(3, 2, 4)
-    this.scene.add(this.pointLight1)
-
-    this.pointLight2 = new THREE.PointLight(0xff6b6b, 0.5, 12)
-    this.pointLight2.position.set(-3, -2, 3)
-    this.scene.add(this.pointLight2)
 
     window.addEventListener('resize', this.handleResize)
   }
@@ -109,7 +96,7 @@ export class WelcomeSceneManager {
 
     // Compute visible area at camera distance
     const dist = 6
-    const vFOV = THREE.MathUtils.degToRad(60)
+    const vFOV = MathUtils.degToRad(60)
     const vH = 2 * Math.tan(vFOV / 2) * dist
     const vW = vH * (window.innerWidth / window.innerHeight)
 
@@ -119,10 +106,25 @@ export class WelcomeSceneManager {
     const outerRY = vH * 0.38
 
     // Load 9 source PNG textures (transparent backgrounds)
-    const loader = new THREE.TextureLoader()
-    const iconPaths = Array.from({ length: ICON_COUNT }, (_, i) =>
-      `/icons/icon-${String((i % SOURCE_COUNT) + 1).padStart(2, '0')}.png`
-    )
+    // 纹理去重：只加载 SOURCE_COUNT 个纹理，循环复用
+    const loader = new TextureLoader()
+    const textures: Texture[] = []
+    const texturePromises: Promise<void>[] = []
+    for (let s = 0; s < SOURCE_COUNT; s++) {
+      const path = `/icons/icon-${String(s + 1).padStart(2, '0')}.png`
+      const tex = loader.load(path, (loadedTex) => {
+        if (this.disposed) return
+        loadedTex.colorSpace = SRGBColorSpace
+      }, undefined, (err) => {
+        console.warn(`[WelcomeScene] Failed to load icon ${path}:`, err)
+      })
+      tex.colorSpace = SRGBColorSpace
+      textures.push(tex)
+    }
+
+    // 共享单个 PlaneGeometry（15 个图标复用，减少 14 个 geometry 对象）
+    const sharedGeometry = new PlaneGeometry(1, 1)
+    this.sharedGeometry = sharedGeometry
 
     for (let i = 0; i < ICON_COUNT; i++) {
       const isInner = i < INNER_COUNT
@@ -139,31 +141,24 @@ export class WelcomeSceneManager {
       const y = Math.sin(angle) * ry
       const z = (Math.random() - 0.5) * 0.2
 
-      const rotX = (Math.random() - 0.5) * THREE.MathUtils.degToRad(16)
-      const rotY = (Math.random() - 0.5) * THREE.MathUtils.degToRad(24)
-      const rotZ = (Math.random() - 0.5) * THREE.MathUtils.degToRad(6)
+      const rotX = (Math.random() - 0.5) * MathUtils.degToRad(16)
+      const rotY = (Math.random() - 0.5) * MathUtils.degToRad(24)
+      const rotZ = (Math.random() - 0.5) * MathUtils.degToRad(6)
 
-       // Load PNG texture — use MeshBasicMaterial to preserve original colors (no lighting tint)
-       const tex = loader.load(iconPaths[i], (loadedTex) => {
-         if (this.disposed) return
-         loadedTex.colorSpace = THREE.SRGBColorSpace
-       }, undefined, (err) => {
-         console.warn(`[WelcomeScene] Failed to load icon ${iconPaths[i]}:`, err)
-       })
-       tex.colorSpace = THREE.SRGBColorSpace
+       // 复用共享纹理和几何体
+       const tex = textures[i % SOURCE_COUNT]
 
-      const geometry = new THREE.PlaneGeometry(1, 1)
-      const material = new THREE.MeshBasicMaterial({
+      const material = new MeshBasicMaterial({
         map: tex,
         transparent: true,
         opacity: 1,
-        side: THREE.DoubleSide,
+        side: DoubleSide,
         alphaTest: 0.05,
       })
 
-      const mesh = new THREE.Mesh(geometry, material)
+      const mesh = new Mesh(sharedGeometry, material)
       // Wrap in group for consistent API with rest of the system
-      const group = new THREE.Group()
+      const group = new Group()
       group.add(mesh)
 
       group.userData = {
@@ -213,13 +208,9 @@ export class WelcomeSceneManager {
   animate(): void {
     const loop = () => {
       this.animationId = requestAnimationFrame(loop)
+      // 标签页隐藏时跳过渲染，节省 GPU/CPU
+      if (useAppStore.getState().paused) return
       const time = performance.now() - this.startTime
-
-      // Pulsing point lights
-      this.pointLight1.intensity = 0.6 + Math.sin(time * 0.002) * 0.3
-      this.pointLight2.intensity = 0.5 + Math.cos(time * 0.0015) * 0.25
-      this.pointLight1.position.x = 3 + Math.sin(time * 0.0008) * 1
-      this.pointLight2.position.y = -2 + Math.cos(time * 0.001) * 1
 
       // Idle animation: floating + wobble
       this.iconGroups.forEach((g) => {
@@ -248,12 +239,12 @@ export class WelcomeSceneManager {
 
     if (hits.length > 0) {
       // Walk up to find the icon group (direct child of iconGroup)
-      let hitGroup: THREE.Group | null = null
-      let obj: THREE.Object3D | null = hits[0].object
+      let hitGroup: Group | null = null
+      let obj: Object3D | null = hits[0].object
       while (obj && obj.parent !== this.iconGroup) {
         obj = obj.parent
       }
-      if (obj) hitGroup = obj as THREE.Group
+      if (obj) hitGroup = obj as Group
 
       if (hitGroup && this.activeIcon !== hitGroup) {
         if (this.activeIcon) {
@@ -269,8 +260,8 @@ export class WelcomeSceneManager {
         gsap.to(hitGroup.rotation, { x: 0, y: 0, z: 0, duration: 0.3, ease: 'power2.out' })
 
         // Fade out icon meshes
-        hitGroup.traverse((child: THREE.Object3D) => {
-          if (child instanceof THREE.Mesh) {
+        hitGroup.traverse((child: Object3D) => {
+          if (child instanceof Mesh) {
             gsap.to(child.material, { opacity: 0.15, duration: 0.2 })
           }
         })
@@ -302,13 +293,13 @@ export class WelcomeSceneManager {
     return null
   }
 
-  private restoreIcon(group: THREE.Group): void {
+  private restoreIcon(group: Group): void {
     const orig = group.userData.originalRotation as { x: number; y: number; z: number }
     gsap.to(group.scale, { x: ICON_SCALE, y: ICON_SCALE, z: ICON_SCALE, duration: 0.3 })
     gsap.to(group.rotation, { x: orig.x, y: orig.y, z: orig.z, duration: 0.3 })
 
-    group.traverse((child: THREE.Object3D) => {
-      if (child instanceof THREE.Mesh) {
+    group.traverse((child: Object3D) => {
+      if (child instanceof Mesh) {
         gsap.to(child.material, { opacity: 1, duration: 0.3 })
       }
     })
@@ -322,8 +313,8 @@ export class WelcomeSceneManager {
         ease: 'power3.in',
       })
 
-      g.traverse((child: THREE.Object3D) => {
-        if (child instanceof THREE.Mesh) {
+      g.traverse((child: Object3D) => {
+        if (child instanceof Mesh) {
           gsap.to(child.material, { opacity: 0, duration: 0.8 })
         }
       })
@@ -361,37 +352,31 @@ export class WelcomeSceneManager {
       gsap.killTweensOf(g.position)
       gsap.killTweensOf(g.scale)
       gsap.killTweensOf(g.rotation)
-      g.traverse((child: THREE.Object3D) => {
-        if (child instanceof THREE.Mesh) {
+      g.traverse((child: Object3D) => {
+        if (child instanceof Mesh) {
           gsap.killTweensOf(child.material)
         }
       })
     })
 
-    // Kill GSAP tweens on point lights
-    gsap.killTweensOf(this.pointLight1)
-    gsap.killTweensOf(this.pointLight1.position)
-    gsap.killTweensOf(this.pointLight2)
-    gsap.killTweensOf(this.pointLight2.position)
-
     window.removeEventListener('resize', this.handleResize)
 
     this.iconGroups.forEach((g) => {
-      g.traverse((child: THREE.Object3D) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose()
-          const m = child.material as THREE.Material & { map?: THREE.Texture }
+      g.traverse((child: Object3D) => {
+        if (child instanceof Mesh) {
+          // geometry 是共享的，不在此处 dispose（下方统一释放）
+          const m = child.material as Material & { map?: Texture }
           m.map?.dispose()
           m.dispose()
         }
       })
     })
+    // 统一释放共享 geometry（只 dispose 一次，避免 15 次 double-free）
+    this.sharedGeometry?.dispose()
+    this.sharedGeometry = null
     this.iconGroups = []
-
-    this.renderer.renderLists.dispose()
-    this.renderer.dispose()
-    if (this.container.contains(this.renderer.domElement)) {
-      this.container.removeChild(this.renderer.domElement)
-    }
+    this.renderer = null as unknown as WebGLRenderer
+    this.scene = null as unknown as Scene
+    this.camera = null as unknown as PerspectiveCamera
   }
 }

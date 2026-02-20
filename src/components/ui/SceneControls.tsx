@@ -1,9 +1,12 @@
 'use client'
 
 import { useAppStore } from '@/stores/useAppStore'
+import { useAudioStore } from '@/stores/useAudioStore'
 
 export default function SceneControls() {
-  const { appState, audioMuted, toggleMute } = useAppStore()
+  const appState = useAppStore((s) => s.appState)
+  const audioMuted = useAudioStore((s) => s.audioMuted)
+  const toggleMute = useAudioStore((s) => s.toggleMute)
 
   return (
     <>
@@ -24,14 +27,12 @@ export default function SceneControls() {
       {(appState === 'WELCOME' || appState === 'SELECTOR' || appState === 'CHRISTMAS' || appState === 'STARRY') && (
         <button
           onClick={() => {
-            const store = useAppStore.getState()
-            const state = store.appState
-            if (state === 'CHRISTMAS' || state === 'STARRY') {
-              store.setAppState('SELECTOR')
-            } else if (state === 'SELECTOR') {
-              store.setAppState('WELCOME')
-            } else if (state === 'WELCOME') {
-              store.setAppState('GIFTBOX')
+            if (appState === 'CHRISTMAS' || appState === 'STARRY') {
+              useAppStore.getState().setAppState('SELECTOR')
+            } else if (appState === 'SELECTOR') {
+              useAppStore.getState().setAppState('WELCOME')
+            } else if (appState === 'WELCOME') {
+              useAppStore.getState().setAppState('GIFTBOX')
             }
           }}
           className="fixed top-4 left-4 z-40 w-10 h-10 rounded-full

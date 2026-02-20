@@ -1,8 +1,9 @@
-import * as THREE from 'three'
+import { Scene, WebGLRenderer } from 'three'
 import type { UserConfig } from '@/types'
 import { HeartDualSystem } from './HeartDualSystem'
 import { HeartSubtitleBanner } from './HeartSubtitleBanner'
 import { SilhouetteDisplay } from './SilhouetteDisplay'
+import { detectQuality, getQualityPreset } from '@/lib/utils/QualityDetector'
 
 /**
  * 爱心场景组合系统
@@ -15,20 +16,22 @@ export class HeartSceneSystem {
   private _visible = false
 
   constructor(
-    scene: THREE.Scene,
-    _renderer: THREE.WebGLRenderer,
+    scene: Scene,
+    renderer: WebGLRenderer,
     config: UserConfig,
     userId: string,
   ) {
-    // 双爱心粒子系统
-    this.heartDual = new HeartDualSystem(scene)
+    // 双爱心粒子系统（根据质量等级调整粒子数）
+    const qualityLevel = detectQuality(renderer)
+    const preset = getQualityPreset(qualityLevel)
+    this.heartDual = new HeartDualSystem(scene, preset.heartParticleCount)
 
     // 字幕条
     const blessing = config.starryBlessing || '星河璀璨，入梦皆甜，万般心意皆有回响。'
-    this.subtitleBanner = new HeartSubtitleBanner(scene, config.name, blessing)
+    this.subtitleBanner = new HeartSubtitleBanner(scene, renderer, config.name, blessing)
 
     // 人物轮廓
-    this.silhouetteDisplay = new SilhouetteDisplay(scene)
+    this.silhouetteDisplay = new SilhouetteDisplay(scene, renderer)
 
     // 异步加载轮廓图
     if (config.starrySilhouette) {

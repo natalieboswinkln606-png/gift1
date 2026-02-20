@@ -16,16 +16,18 @@ export class SnowCanvas {
   private isDrawing = false
   private lastPoint: Point | null = null
   private drawCallCount = 0
+  private erasedArea = 0  // 累计擦除面积（像素²），替代 getImageData 读取
   private idleTimerId: ReturnType<typeof setTimeout> | null = null
   private meltTimerId: ReturnType<typeof setTimeout> | null = null
   private onCompleteCallback: (() => void) | null = null
   private resizeHandler: () => void
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null
   private rafIds: number[] = []
   private disposed = false
 
   brushSize = 20
 
-  constructor(container: HTMLDivElement) {
+  constructor(container: HTMLDivElement, blurAmount = 15) {
     this.container = container
 
     // Wrapper — sits on top of Three.js canvas
@@ -43,8 +45,8 @@ export class SnowCanvas {
     Object.assign(this.blurLayer.style, {
       position: 'absolute',
       inset: '0',
-      backdropFilter: 'blur(15px)',
-      WebkitBackdropFilter: 'blur(15px)',
+      backdropFilter: blurAmount > 0 ? `blur(${blurAmount}px)` : 'none',
+      WebkitBackdropFilter: blurAmount > 0 ? `blur(${blurAmount}px)` : 'none',
       background: 'rgba(255,255,255,0.05)',
       opacity: '0',
       transition: 'opacity 0.5s ease',
@@ -68,13 +70,16 @@ export class SnowCanvas {
     this.container.appendChild(this.wrapper)
 
     this.resizeHandler = () => {
-      this.canvas.width = window.innerWidth
-      this.canvas.height = window.innerHeight
-      // If in drawing state, refill white
-      if (this.state === 'DRAWING') {
-        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
-      }
+      if (this.resizeTimer) clearTimeout(this.resizeTimer)
+      this.resizeTimer = setTimeout(() => {
+        this.canvas.width = window.innerWidth
+        this.canvas.height = window.innerHeight
+        // If in drawing state, refill white
+        if (this.state === 'DRAWING') {
+          this.ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
+          this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
+        }
+      }, 150)
     }
     window.addEventListener('resize', this.resizeHandler)
   }
@@ -145,6 +150,7 @@ export class SnowCanvas {
         this.blurLayer.style.opacity = '1'
         this.state = 'DRAWING'
         this.drawCallCount = 0
+        this.erasedArea = 0
         this.resetIdleTimer()
       }
     }
@@ -171,6 +177,11 @@ export class SnowCanvas {
     const currentPoint = { x, y }
 
     if (this.lastPoint) {
+      // 累计擦除面积：笔触长度 × 笔刷直径（近似矩形覆盖）
+      const dx = currentPoint.x - this.lastPoint.x
+      const dy = currentPoint.y - this.lastPoint.y
+      const strokeLen = Math.sqrt(dx * dx + dy * dy)
+      this.erasedArea += strokeLen * this.brushSize
       this.drawStroke(this.lastPoint, currentPoint)
     }
 
@@ -190,7 +201,9 @@ export class SnowCanvas {
   }
 
   getErasedPercentage(): number {
-    return this.calculateErasedArea()
+    const totalArea = this.canvas.width * this.canvas.height
+    if (totalArea === 0) return 0
+    return (this.erasedArea / totalArea) * 100
   }
 
   triggerMelting(): void {
@@ -235,6 +248,10 @@ export class SnowCanvas {
   dispose(): void {
     this.disposed = true
     this.clearIdleTimer()
+    if (this.resizeTimer !== null) {
+      clearTimeout(this.resizeTimer)
+      this.resizeTimer = null
+    }
     if (this.meltTimerId !== null) {
       clearTimeout(this.meltTimerId)
       this.meltTimerId = null
@@ -268,26 +285,10 @@ export class SnowCanvas {
     ctx.restore()
   }
 
-  private calculateErasedArea(): number {
-    const w = this.canvas.width
-    const h = this.canvas.height
-    const imageData = this.ctx.getImageData(0, 0, w, h)
-    const data = imageData.data
-    const totalPixels = w * h
-
-    let erasedCount = 0
-    // Sample every 4th pixel (stride 16 bytes) for performance
-    for (let i = 3; i < data.length; i += 16) {
-      if (data[i] < 128) {
-        erasedCount += 4 // compensate for sampling
-      }
-    }
-
-    return (erasedCount / totalPixels) * 100
-  }
-
   private checkErasedPercentage(): void {
-    const pct = this.calculateErasedArea()
+    const totalArea = this.canvas.width * this.canvas.height
+    if (totalArea === 0) return
+    const pct = (this.erasedArea / totalArea) * 100
     if (pct >= 50 && this.state === 'DRAWING') {
       this.triggerMelting()
     }

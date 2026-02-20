@@ -1,6 +1,7 @@
 'use client'
 
 import React, { ReactNode } from 'react'
+import { useAppStore } from '@/stores/useAppStore'
 
 interface Props {
   children: ReactNode
@@ -27,6 +28,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   }
 
   handleRetry = () => {
+    useAppStore.getState().resetState()
     this.setState({ hasError: false, error: null, resetKey: this.state.resetKey + 1 })
   }
 

@@ -8,6 +8,14 @@ interface PreloadOverlayProps {
 
 export default function PreloadOverlay({ progress }: PreloadOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const stoppedRef = useRef(false)
+
+  // progress >= 100 时停止 canvas 动画
+  useEffect(() => {
+    if (progress >= 100) {
+      stoppedRef.current = true
+    }
+  }, [progress])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -29,8 +37,20 @@ export default function PreloadOverlay({ progress }: PreloadOverlayProps) {
 
     let animId: number
 
+    // 响应窗口 resize
+    const handleResize = () => {
+      canvas.width = window.innerWidth
+      canvas.height = window.innerHeight
+      // 重新随机化粒子位置，防止飞出画布
+      particles.forEach(p => {
+        p.x = Math.random() * canvas.width
+        p.y = Math.random() * canvas.height
+      })
+    }
+    window.addEventListener('resize', handleResize)
+
     function animate() {
-      if (!ctx || !canvas) return
+      if (!ctx || !canvas || stoppedRef.current) return
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
       particles.forEach(p => {
@@ -49,7 +69,11 @@ export default function PreloadOverlay({ progress }: PreloadOverlayProps) {
 
     animate()
 
-    return () => cancelAnimationFrame(animId)
+    return () => {
+      stoppedRef.current = true
+      cancelAnimationFrame(animId)
+      window.removeEventListener('resize', handleResize)
+    }
   }, [])
 
   return (

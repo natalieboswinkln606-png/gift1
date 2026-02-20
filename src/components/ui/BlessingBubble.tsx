@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { memo } from 'react'
+import { useTypewriter } from '@/hooks/useTypewriter'
 
 interface BlessingBubbleProps {
   text: string
@@ -9,39 +10,8 @@ interface BlessingBubbleProps {
   visible: boolean
 }
 
-export default function BlessingBubble({ text, x, y, visible }: BlessingBubbleProps) {
-  const [displayText, setDisplayText] = useState('')
-  const [isAnimating, setIsAnimating] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    if (!visible) {
-      setDisplayText('')
-      setIsAnimating(false)
-      if (timerRef.current) clearTimeout(timerRef.current)
-      return
-    }
-
-    setIsAnimating(true)
-    setDisplayText('')
-
-    let index = 0
-
-    function typeChar() {
-      if (index < text.length) {
-        setDisplayText(text.slice(0, index + 1))
-        index++
-        if (timerRef.current) clearTimeout(timerRef.current)
-        timerRef.current = setTimeout(typeChar, 80)
-      }
-    }
-
-    typeChar()
-
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [text, visible])
+function BlessingBubble({ text, x, y, visible }: BlessingBubbleProps) {
+  const displayText = useTypewriter(text, visible)
 
   if (!visible) return null
 
@@ -62,7 +32,7 @@ export default function BlessingBubble({ text, x, y, visible }: BlessingBubblePr
         flex items-center justify-center text-center
         transition-all duration-200
         backdrop-blur-sm
-        ${isAnimating ? 'w-[220px] min-h-[80px] p-5 opacity-100' : 'w-0 h-0 p-0 opacity-0'}
+        ${visible ? 'w-[220px] min-h-[80px] p-5 opacity-100' : 'w-0 h-0 p-0 opacity-0'}
       `}>
         <div className="relative">
           {displayText}
@@ -72,3 +42,5 @@ export default function BlessingBubble({ text, x, y, visible }: BlessingBubblePr
     </div>
   )
 }
+
+export default memo(BlessingBubble)

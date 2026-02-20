@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import localFont from 'next/font/local'
 import './globals.css'
 
@@ -22,6 +22,14 @@ const playfair = localFont({
 export const metadata: Metadata = {
   title: '新年礼物',
   description: '数字化新年贺礼交互系统',
+  robots: { index: false },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 }
 
 export default function RootLayout({
@@ -31,6 +39,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN" className={`${notoSerif.variable} ${playfair.variable}`}>
+      <head />
       <body className="font-serif">{children}</body>
     </html>
   )

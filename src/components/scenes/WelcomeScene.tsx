@@ -1,17 +1,21 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { WebGLRenderer } from 'three'
 import { useAppStore } from '@/stores/useAppStore'
 import type { UserConfig } from '@/types'
+import { useAnimationLoop } from '@/hooks/useAnimationLoop'
+import { getPointerCoords } from '@/lib/utils/pointerUtils'
 import BlessingBubble from '@/components/ui/BlessingBubble'
 import HiddenButton from '@/components/ui/HiddenButton'
 
 interface WelcomeSceneProps {
   userId: string
   config: UserConfig
+  renderer: WebGLRenderer
 }
 
-export default function WelcomeScene({ userId, config }: WelcomeSceneProps) {
+export default function WelcomeScene({ userId, config, renderer }: WelcomeSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sceneManagerRef = useRef<import('@/lib/three/WelcomeSceneManager').WelcomeSceneManager | null>(null)
   const fireworkRef = useRef<import('@/lib/three/FireworkSystem').FireworkSystem | null>(null)
@@ -23,6 +27,12 @@ export default function WelcomeScene({ userId, config }: WelcomeSceneProps) {
     text: '', x: 0, y: 0, visible: false,
   })
   const [transitioning, setTransitioning] = useState(false)
+  const transitioningRef = useRef(false)
+
+  // 统一动画循环：驱动 FireworkSystem（useAnimationLoop 自动处理 RAF + paused + 卸载清理）
+  useAnimationLoop(() => {
+    fireworkRef.current?.update()
+  })
 
   // Init scene manager + fireworks
   useEffect(() => {
@@ -33,7 +43,7 @@ export default function WelcomeScene({ userId, config }: WelcomeSceneProps) {
       if (disposed || !containerRef.current) return
 
       // Three.js icon sprites
-      const mgr = new WelcomeSceneManager(containerRef.current!)
+      const mgr = new WelcomeSceneManager(containerRef.current!, renderer)
       mgr.init()
       mgr.animate()
       sceneManagerRef.current = mgr
@@ -47,6 +57,9 @@ export default function WelcomeScene({ userId, config }: WelcomeSceneProps) {
       fireworkRef.current = fw
     })
 
+    // 预热下一场景 chunk：Welcome 期间并行下载 SelectorScene
+    import('@/components/scenes/SelectorScene')
+
     return () => {
       disposed = true
       sceneManagerRef.current?.dispose()
@@ -56,31 +69,14 @@ export default function WelcomeScene({ userId, config }: WelcomeSceneProps) {
     }
   }, [])
 
-  // Firework animation loop
-  useEffect(() => {
-    let animId: number
-    const loop = () => {
-      animId = requestAnimationFrame(loop)
-      fireworkRef.current?.update()
-    }
-    animId = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(animId)
-  }, [])
-
   // Mouse/touch move → hover detection
   const handlePointerMove = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     const mgr = sceneManagerRef.current
-    if (!mgr || transitioning) return
+    if (!mgr || transitioningRef.current) return
 
-    let clientX: number, clientY: number
-    if ('touches' in e) {
-      if (!e.touches.length) return
-      clientX = e.touches[0].clientX
-      clientY = e.touches[0].clientY
-    } else {
-      clientX = e.clientX
-      clientY = e.clientY
-    }
+    const coords = getPointerCoords(e)
+    if (!coords) return
+    const { clientX, clientY } = coords
 
     const result = mgr.handleMouseMove(clientX, clientY)
     if (result) {
@@ -88,11 +84,14 @@ export default function WelcomeScene({ userId, config }: WelcomeSceneProps) {
     } else {
       setBubble((prev) => (prev.visible ? { ...prev, visible: false } : prev))
     }
-  }, [transitioning])
+  }, [])
+
+  const handleHiddenActivate = useCallback(() => {}, [])
 
   // Transition to SELECTOR
   const triggerTransition = useCallback(() => {
-    if (transitioning) return
+    if (transitioningRef.current) return
+    transitioningRef.current = true
     setTransitioning(true)
 
     // Hide bubble
@@ -105,7 +104,7 @@ export default function WelcomeScene({ userId, config }: WelcomeSceneProps) {
     sceneManagerRef.current?.playExitAnimation(() => {
       setAppState('SELECTOR')
     })
-  }, [transitioning, setAppState])
+  }, [setAppState])
 
   // Scroll / swipe / key detection for transition
   useEffect(() => {
@@ -179,7 +178,7 @@ export default function WelcomeScene({ userId, config }: WelcomeSceneProps) {
 
       {/* Hidden button */}
       <div ref={hiddenButtonRef}>
-        <HiddenButton onActivate={() => {}} particleProximity={0.1} />
+        <HiddenButton onActivate={handleHiddenActivate} particleProximity={0.2} />
       </div>
 
       {/* Scroll hint */}

@@ -1,4 +1,19 @@
-import * as THREE from 'three'
+import {
+  Camera,
+  Layers,
+  LinearFilter,
+  Material,
+  Mesh,
+  MeshBasicMaterial,
+  NoToneMapping,
+  Object3D,
+  RGBAFormat,
+  Scene,
+  ShaderMaterial,
+  Vector2,
+  WebGLRenderer,
+  WebGLRenderTarget,
+} from 'three'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
@@ -10,32 +25,38 @@ export const BLOOM_LAYER = 1
 export class SelectiveBloom {
   private bloomComposer: EffectComposer
   private finalComposer: EffectComposer
-  private bloomLayer = new THREE.Layers()
-  private materials = new WeakMap<THREE.Object3D, THREE.Material | THREE.Material[]>()
-  private scene: THREE.Scene
-  private renderer: THREE.WebGLRenderer
-  private camera: THREE.Camera
-  private darkMaterial: THREE.MeshBasicMaterial
-  private mixShader: THREE.ShaderMaterial
+  private bloomLayer = new Layers()
+  private materials = new WeakMap<Object3D, Material | Material[]>()
+  private scene: Scene
+  private renderer: WebGLRenderer
+  private camera: Camera
+  private darkMaterial: MeshBasicMaterial
+  private mixShader: ShaderMaterial
   private bloomPass!: UnrealBloomPass
-  private nonBloomMeshes: THREE.Mesh[] = []
+  private bloomScale: number
+  private nonBloomMeshes: Mesh[] = []
   private cacheValid = false
+  private ultraLowMode = false  // ULTRA_LOW 模式：单 pass bloom
+  private ultraLowComposer: EffectComposer | null = null  // ULTRA_LOW 单 pass composer
 
   constructor(
-    renderer: THREE.WebGLRenderer,
-    scene: THREE.Scene,
-    camera: THREE.Camera
+    renderer: WebGLRenderer,
+    scene: Scene,
+    camera: Camera,
+    bloomScale = 1.0
   ) {
     this.scene = scene
     this.renderer = renderer
     this.camera = camera
+    this.bloomScale = Math.max(0.125, Math.min(1.0, bloomScale))
+    this.ultraLowMode = bloomScale <= 0.5
     this.bloomLayer.set(BLOOM_LAYER)
-    this.darkMaterial = new THREE.MeshBasicMaterial({ color: 'black' })
+    this.darkMaterial = new MeshBasicMaterial({ color: 'black' })
 
     // Bloom composer
     const renderPass1 = new RenderPass(scene, camera)
     const bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      new Vector2(window.innerWidth, window.innerHeight),
       1.5,  // strength (constructor param)
       0.4,  // radius (constructor param)
       0.85  // threshold (constructor param)
@@ -45,13 +66,36 @@ export class SelectiveBloom {
     bloomPass.radius = 0.3
     this.bloomPass = bloomPass
 
-    this.bloomComposer = new EffectComposer(renderer)
+    // Bloom 可以在低分辨率下渲染（bloom 本身就是模糊效果，降分辨率对视觉影响极小）
+    const bloomW = Math.floor(window.innerWidth * this.bloomScale)
+    const bloomH = Math.floor(window.innerHeight * this.bloomScale)
+    const bloomRT = new WebGLRenderTarget(bloomW, bloomH, {
+      minFilter: LinearFilter,
+      magFilter: LinearFilter,
+      format: RGBAFormat,
+    })
+    this.bloomComposer = new EffectComposer(renderer, bloomRT)
     this.bloomComposer.renderToScreen = false
     this.bloomComposer.addPass(renderPass1)
     this.bloomComposer.addPass(bloomPass)
 
+    if (this.ultraLowMode) {
+      // ULTRA_LOW 模式：单 composer 直接渲染到屏幕
+      // 避免 finalComposer 的第二次场景渲染，节省 ~50% GPU 开销
+      const ulComposer = new EffectComposer(renderer)
+      ulComposer.addPass(new RenderPass(scene, camera))
+      ulComposer.addPass(new UnrealBloomPass(
+        new Vector2(bloomW, bloomH),
+        bloomPass.strength,
+        bloomPass.radius,
+        bloomPass.threshold
+      ))
+      ulComposer.addPass(new OutputPass())
+      this.ultraLowComposer = ulComposer
+    }
+
     // Mix shader
-    this.mixShader = new THREE.ShaderMaterial({
+    this.mixShader = new ShaderMaterial({
       uniforms: {
         baseTexture: { value: null },
         bloomTexture: { value: this.bloomComposer.renderTarget2.texture },
@@ -94,8 +138,8 @@ export class SelectiveBloom {
     if (this.cacheValid) return
     this.nonBloomMeshes.length = 0
     this.scene.traverse((obj) => {
-      if ((obj as THREE.Mesh).isMesh && !this.bloomLayer.test(obj.layers)) {
-        this.nonBloomMeshes.push(obj as THREE.Mesh)
+      if ((obj as Mesh).isMesh && !this.bloomLayer.test(obj.layers)) {
+        this.nonBloomMeshes.push(obj as Mesh)
       }
     })
     this.cacheValid = true
@@ -130,25 +174,41 @@ export class SelectiveBloom {
     }
   }
 
-  render(overlayMeshes?: THREE.Mesh[]): void {
-    // Hide overlay meshes during bloom pipeline so bloom glow doesn't bleed onto them
-    const prevVisible: boolean[] = []
+  render(overlayMeshes?: Mesh[]): void {
+    // 保存 overlay mesh 可见性并隐藏，避免 bloom 溢出到 overlay 上
+    let prevVisible: boolean[] | undefined
     if (overlayMeshes) {
+      prevVisible = []
       for (const mesh of overlayMeshes) {
         prevVisible.push(mesh.visible)
         mesh.visible = false
       }
     }
 
-    // Standard selective bloom pipeline (cached)
-    this.ensureCache()
-    this.darkenCached()
-    this.bloomComposer.render()
-    this.restoreCached()
-    this.finalComposer.render()
+    // 统一禁用 toneMapping（OutputPass 已处理色调映射，避免双重映射导致色差）
+    const prevToneMapping = this.renderer.toneMapping
+    this.renderer.toneMapping = NoToneMapping
 
-    // Restore overlay mesh visibility and render them after bloom
-    if (overlayMeshes) {
+    if (this.ultraLowMode && this.ultraLowComposer) {
+      // ULTRA_LOW 模式：单 composer，场景只渲染 1 次（而非 2 次）
+      this.ultraLowComposer.render()
+    } else if (this.ultraLowMode) {
+      // 回退：双 composer（不应到达此分支）
+      this.bloomComposer.render()
+      this.finalComposer.render()
+    } else {
+      // 标准 selective bloom pipeline (cached)
+      this.ensureCache()
+      this.darkenCached()
+      this.bloomComposer.render()
+      this.restoreCached()
+      this.finalComposer.render()
+    }
+
+    this.renderer.toneMapping = prevToneMapping
+
+    // 恢复 overlay mesh 可见性并在 bloom 之后渲染
+    if (overlayMeshes && prevVisible) {
       for (let i = 0; i < overlayMeshes.length; i++) {
         overlayMeshes[i].visible = prevVisible[i]
       }
@@ -159,12 +219,11 @@ export class SelectiveBloom {
         this.renderer.autoClear = false
         this.renderer.clearDepth()
 
-        // Render only the overlay meshes by temporarily hiding all other scene children
+        // 仅渲染 overlay mesh：临时隐藏所有其他场景子对象
         const topChildren = this.scene.children
         const topVis: boolean[] = []
         for (const child of topChildren) {
           topVis.push(child.visible)
-          // Hide everything except parents of overlay meshes
           let containsOverlay = false
           for (const mesh of overlayMeshes) {
             if (mesh.visible && isDescendantOf(mesh, child)) {
@@ -175,39 +234,51 @@ export class SelectiveBloom {
           if (!containsOverlay) child.visible = false
         }
 
-        this.renderer.render(this.scene, this.camera)
-
-        // Restore top-level visibility
-        for (let i = 0; i < topChildren.length; i++) {
-          topChildren[i].visible = topVis[i]
+        try {
+          this.renderer.render(this.scene, this.camera)
+        } finally {
+          for (let i = 0; i < topChildren.length; i++) {
+            topChildren[i].visible = topVis[i]
+          }
+          this.renderer.autoClear = prevAutoClear
         }
-        this.renderer.autoClear = prevAutoClear
       }
     }
   }
 
   resize(width: number, height: number): void {
-    this.bloomComposer.setSize(width, height)
+    // Bloom composer 使用缩放后的分辨率
+    this.bloomComposer.setSize(
+      Math.floor(width * this.bloomScale),
+      Math.floor(height * this.bloomScale)
+    )
+    // Final composer 保持全分辨率
     this.finalComposer.setSize(width, height)
+    // ULTRA_LOW 单 composer
+    if (this.ultraLowComposer) {
+      this.ultraLowComposer.setSize(width, height)
+    }
   }
 
   dispose(): void {
     this.darkMaterial.dispose()
     this.mixShader.dispose()
-    this.bloomComposer.renderTarget1?.dispose()
-    this.bloomComposer.renderTarget2?.dispose()
-    this.finalComposer.renderTarget1?.dispose()
-    this.finalComposer.renderTarget2?.dispose()
+    // EffectComposer.dispose() 内部会释放其 renderTarget1/2，无需手动 double-free
     this.bloomComposer.dispose()
     this.finalComposer.dispose()
+    if (this.ultraLowComposer) {
+      this.ultraLowComposer.dispose()
+    }
     this.nonBloomMeshes.length = 0
     this.cacheValid = false
+    // 重置 render target 绑定，避免下一个场景渲染到已释放的 RT
+    this.renderer.setRenderTarget(null)
   }
 }
 
 /** Check if obj is a descendant of (or equal to) ancestor */
-function isDescendantOf(obj: THREE.Object3D, ancestor: THREE.Object3D): boolean {
-  let current: THREE.Object3D | null = obj
+function isDescendantOf(obj: Object3D, ancestor: Object3D): boolean {
+  let current: Object3D | null = obj
   while (current) {
     if (current === ancestor) return true
     current = current.parent
