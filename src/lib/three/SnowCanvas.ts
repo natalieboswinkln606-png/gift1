@@ -84,19 +84,16 @@ export class SnowCanvas {
     this.canvas = document.createElement('canvas')
     Object.assign(this.canvas.style, {
       position: 'absolute',
-      inset: '0',
-      width: '100%',
-      height: '100%',
+      left: '0',
+      top: '0',
       touchAction: 'none',
       userSelect: 'none',
       cursor: 'crosshair',
       transition: 'opacity 1.5s ease, transform 1.5s ease',
     })
 
-    // canvas 尺寸匹配容器
-    const rect = container.getBoundingClientRect()
-    this.canvas.width = rect.width
-    this.canvas.height = rect.height
+    // canvas 尺寸匹配容器（像素缓冲区 + CSS 显示尺寸同步）
+    this.syncCanvasSize()
 
     this.ctx = this.canvas.getContext('2d')!
 
@@ -366,8 +363,13 @@ export class SnowCanvas {
 
   private syncCanvasSize(): void {
     const rect = this.container.getBoundingClientRect()
-    this.canvas.width = rect.width
-    this.canvas.height = rect.height
+    // fallback: 如果容器还没有布局，使用 window 尺寸
+    const w = Math.round(rect.width) || window.innerWidth
+    const h = Math.round(rect.height) || window.innerHeight
+    this.canvas.width = w
+    this.canvas.height = h
+    this.canvas.style.width = w + 'px'
+    this.canvas.style.height = h + 'px'
   }
 
   private handleResize(): void {
