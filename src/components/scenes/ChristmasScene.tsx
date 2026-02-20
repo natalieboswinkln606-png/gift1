@@ -484,8 +484,8 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
     <>
       <LoadingScreen visible={loading} />
 
-      {/* Three.js container — absolute 定位确保填满父容器并接收 OrbitControls 事件 */}
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* Three.js container — z-10 确保高于共享 renderer canvas (z-5)，SnowCanvas wrapper (z-60) 才能可见 */}
+      <div ref={containerRef} className="absolute inset-0 z-10" />
 
       {/* Music player — audioReady 触发重渲染确保 ref 非 null */}
       {audioReady && <MusicPlayer audioEngine={audioEngineRef.current} />}
