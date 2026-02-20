@@ -42,35 +42,16 @@ export class PhotoSystem {
   async loadFromConfig(config: UserConfig, userId: string): Promise<void> {
     if (!config.christmasPhotos?.length) return
     const loader = new TextureLoader()
-    const promises = config.christmasPhotos.map((photoPath) => {
+    const promises = config.christmasPhotos.map(async (photoPath) => {
       const url = `/users/${userId}/${photoPath}`
-      return new Promise<Texture | null>((resolve) => {
+      // 先加载纹理
+      const tex = await new Promise<Texture | null>((resolve) => {
         if (this.disposed) { resolve(null); return }
         loader.load(
           url,
-          (tex) => {
-            if (this.disposed) { tex.dispose(); resolve(null); return }
-            // 限制纹理最大尺寸为 2048px，减少 GPU 显存占用（4K 照片 ~32MB → 2048 ~16MB）
-            const maxSize = 2048
-            const img = tex.image as HTMLImageElement
-            if (img.width > maxSize || img.height > maxSize) {
-              const scale = maxSize / Math.max(img.width, img.height)
-              const w = Math.floor(img.width * scale)
-              const h = Math.floor(img.height * scale)
-              const canvas = document.createElement('canvas')
-              canvas.width = w
-              canvas.height = h
-              const ctx = canvas.getContext('2d')!
-              ctx.drawImage(img, 0, 0, w, h)
-              tex.image = canvas
-              tex.needsUpdate = true
-            }
-            tex.colorSpace = SRGBColorSpace
-            tex.minFilter = LinearMipmapLinearFilter
-            tex.magFilter = LinearFilter
-            tex.anisotropy = Math.min(4, 16)  // 限制 anisotropy 为 4，减少 GPU 采样开销
-            tex.generateMipmaps = true
-            resolve(tex)
+          (loadedTex) => {
+            if (this.disposed) { loadedTex.dispose(); resolve(null); return }
+            resolve(loadedTex)
           },
           undefined,
           () => {
@@ -79,6 +60,40 @@ export class PhotoSystem {
           }
         )
       })
+      if (!tex || this.disposed) return null
+
+      // 异步缩放：createImageBitmap 不阻塞主线程，带 canvas 降级
+      const maxSize = 2048
+      const img = tex.image as HTMLImageElement
+      if (img.width > maxSize || img.height > maxSize) {
+        const scale = maxSize / Math.max(img.width, img.height)
+        const w = Math.floor(img.width * scale)
+        const h = Math.floor(img.height * scale)
+        try {
+          const bitmap = await createImageBitmap(img, {
+            resizeWidth: w, resizeHeight: h, resizeQuality: 'medium',
+          })
+          if (this.disposed) { bitmap.close(); tex.dispose(); return null }
+          tex.image = bitmap
+          tex.needsUpdate = true
+        } catch {
+          // 降级：同步 canvas 缩放（兼容旧浏览器）
+          const canvas = document.createElement('canvas')
+          canvas.width = w
+          canvas.height = h
+          const ctx = canvas.getContext('2d')!
+          ctx.drawImage(img, 0, 0, w, h)
+          tex.image = canvas
+          tex.needsUpdate = true
+        }
+      }
+
+      tex.colorSpace = SRGBColorSpace
+      tex.minFilter = LinearMipmapLinearFilter
+      tex.magFilter = LinearFilter
+      tex.anisotropy = Math.min(4, 16)  // 限制 anisotropy 为 4，减少 GPU 采样开销
+      tex.generateMipmaps = true
+      return tex
     })
 
     const textures = await Promise.all(promises)

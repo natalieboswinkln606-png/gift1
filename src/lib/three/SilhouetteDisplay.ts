@@ -46,7 +46,7 @@ export class SilhouetteDisplay {
       if (this.disposed) throw new Error('已销毁，中断加载')
       try {
         const img = new Image()
-        img.crossOrigin = 'anonymous'
+        // 同域静态资源不需要 crossOrigin，设置后反而触发 CORS 预检失败
         await new Promise<void>((resolve, reject) => {
           const timeoutId = setTimeout(() => reject(new Error('轮廓图加载超时')), 30000)
           img.onload = () => { clearTimeout(timeoutId); resolve() }

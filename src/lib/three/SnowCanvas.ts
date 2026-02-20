@@ -15,6 +15,7 @@ export class SnowCanvas {
   private state: DrawingState = 'IDLE'
   private isDrawing = false
   private lastPoint: Point | null = null
+  private pendingStartPoint: Point | null = null
   private drawCallCount = 0
   private erasedArea = 0  // 累计擦除面积（像素²），替代 getImageData 读取
   private idleTimerId: ReturnType<typeof setTimeout> | null = null
@@ -35,7 +36,7 @@ export class SnowCanvas {
     Object.assign(this.wrapper.style, {
       position: 'fixed',
       inset: '0',
-      zIndex: '30',
+      zIndex: '60',
       display: 'none',
       pointerEvents: 'auto',
     })
@@ -67,7 +68,7 @@ export class SnowCanvas {
 
     this.wrapper.appendChild(this.blurLayer)
     this.wrapper.appendChild(this.canvas)
-    this.container.appendChild(this.wrapper)
+    document.body.appendChild(this.wrapper)
 
     this.resizeHandler = () => {
       if (this.resizeTimer) clearTimeout(this.resizeTimer)
@@ -157,6 +158,12 @@ export class SnowCanvas {
         this.drawCallCount = 0
         this.erasedArea = 0
         this.resetIdleTimer()
+        // 雪花动画期间缓存的起始点，立即恢复为笔触起点
+        if (this.pendingStartPoint) {
+          this.isDrawing = true
+          this.lastPoint = this.pendingStartPoint
+          this.pendingStartPoint = null
+        }
       }
     }
 
@@ -166,6 +173,11 @@ export class SnowCanvas {
   }
 
   startDrawing(x: number, y: number): void {
+    if (this.state === 'SNOWSTORM') {
+      // 雪花动画期间缓存起始点，动画完成后自动恢复
+      this.pendingStartPoint = { x, y }
+      return
+    }
     if (this.state !== 'DRAWING') return
     this.isDrawing = true
     this.lastPoint = { x, y }
@@ -231,6 +243,7 @@ export class SnowCanvas {
   forceExit(): void {
     this.isDrawing = false
     this.lastPoint = null
+    this.pendingStartPoint = null
     this.clearIdleTimer()
     if (this.meltTimerId !== null) {
       clearTimeout(this.meltTimerId)
@@ -261,6 +274,7 @@ export class SnowCanvas {
     this.rafIds = []
     window.removeEventListener('resize', this.resizeHandler)
     this.isDrawing = false
+    this.pendingStartPoint = null
     this.state = 'IDLE'
     if (this.wrapper.parentNode) {
       this.wrapper.parentNode.removeChild(this.wrapper)

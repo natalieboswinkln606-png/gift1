@@ -80,8 +80,7 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
     const audio = audioEngineRef.current
     const star = starBuilderRef.current
     const stars = bgStarsRef.current
-    const bloom = selectiveBloomRef.current
-    if (!sm || !ps || !photos || !audio || !star || !stars || !bloom) return
+    if (!sm || !ps || !photos || !audio || !star || !stars) return
 
     const time = sm.clock.getElapsedTime()
     const dt = time - lastTimeRef.current
@@ -118,12 +117,21 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
     star.update(time, isTree, 85)
     stars.update(time)
 
-    // Pass active photo as overlay so it renders after bloom (avoids glow bleed)
+    // 渲染：bloom 延迟初始化，可能为 null（首帧用简单渲染降级）
+    const bloom = selectiveBloomRef.current
     if (photos.activePhoto) {
-      overlayMeshesRef.current[0] = photos.activePhoto
-      bloom.render(overlayMeshesRef.current)
+      if (bloom) {
+        overlayMeshesRef.current[0] = photos.activePhoto
+        bloom.render(overlayMeshesRef.current)
+      } else {
+        sm.renderer.render(sm.scene, sm.camera)
+      }
     } else {
-      bloom.render(undefined)
+      if (bloom) {
+        bloom.render(undefined)
+      } else {
+        sm.renderer.render(sm.scene, sm.camera)
+      }
     }
   })
 
@@ -203,10 +211,8 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
         const ps = new ParticleSystem(sm.scene, { count: preset.particleCount, trunkCount: preset.trunkCount }, config.name)
         particleSystemRef.current = ps
 
-        // Selective bloom
-        const bloom = new SelectiveBloom(sm.renderer, sm.scene, sm.camera, preset.bloomScale)
-        selectiveBloomRef.current = bloom
-        sm.onResize((w, h) => bloom.resize(w, h))
+        // Selective bloom — 延迟到 setLoading(false) 之后初始化（节省 30-80ms 关键路径时间）
+        // bloom 在动画循环中为可选，首帧用 renderer.render 降级渲染
 
         // Background stars
         const stars = new BackgroundStars(sm.scene, preset.bgStarCount)
@@ -216,25 +222,18 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
         const star = new StarBuilder(sm.scene)
         starBuilderRef.current = star
 
-        // Photo system + Audio engine — 并行加载照片和音乐列表（消除串行网络等待）
+        // Photo system + Audio engine
         const photos = new PhotoSystem(sm.scene)
         const audio = new AudioEngine()
 
-        const [, musicResult] = await Promise.all([
-          photos.loadFromConfig(config, userId),
-          fetch('/music.json')
-            .then(r => r.ok ? r.json() as Promise<Array<{ name: string; url: string }>> : null)
-            .catch(() => null),
-        ])
+        // 关键路径：只等照片加载（music.json 移出关键路径，不阻塞 setLoading）
+        await photos.loadFromConfig(config, userId)
 
         ps.setPhotoGroup(photos.photoGroup)
         photoSystemRef.current = photos
 
-        if (musicResult && musicResult.length > 0) {
-          audio.setPlaylist(musicResult)
-        } else {
-          audio.setPlaylist([{ name: 'Harbor', url: '/music/Harbor.mp3' }])
-        }
+        // 立即设置默认播放列表，不等 music.json
+        audio.setPlaylist([{ name: 'Harbor', url: '/music/Harbor.mp3' }])
         audioEngineRef.current = audio
         setAudioReady(true)
 
@@ -262,13 +261,31 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
           audio.dispose()
           star.dispose()
           stars.dispose()
-          bloom.dispose()
           ps.dispose()
           sm.dispose()
           return
         }
 
         setLoading(false)
+
+        // 延迟初始化 bloom（不阻塞首帧渲染，节省 30-80ms）
+        // 使用 setTimeout(0) 让首帧先渲染，下一个事件循环再创建 bloom
+        setTimeout(() => {
+          if (disposed) return
+          const bloom = new SelectiveBloom(sm.renderer, sm.scene, sm.camera, preset.bloomScale)
+          selectiveBloomRef.current = bloom
+          sm.onResize((w: number, h: number) => bloom.resize(w, h))
+        }, 0)
+
+        // 后台更新播放列表（不阻塞加载完成）
+        fetch('/music.json')
+          .then(r => r.ok ? r.json() as Promise<Array<{ name: string; url: string }>> : null)
+          .catch(() => null)
+          .then(musicResult => {
+            if (!disposed && musicResult && musicResult.length > 0) {
+              audio.setPlaylist(musicResult)
+            }
+          })
       } catch (err) {
         console.error('[ChristmasScene] Failed to init:', err)
         setLoading(false)
@@ -453,7 +470,9 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
     // Mouse drawing handlers — SnowCanvas 是 position:fixed，坐标直接用 clientX/clientY
     function handleMouseDown(e: MouseEvent) {
       const snow = snowCanvasRef.current
-      if (!snow || snow.getState() !== 'DRAWING') return
+      if (!snow) return
+      const snowState = snow.getState()
+      if (snowState !== 'DRAWING' && snowState !== 'SNOWSTORM') return
       if (e.button !== 0) return
 
       snow.startDrawing(e.clientX, e.clientY)
@@ -476,15 +495,17 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
     }
 
     el.addEventListener('click', handleClick)
-    el.addEventListener('mousedown', handleMouseDown)
+    window.addEventListener('mousedown', handleMouseDown)
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
+    window.addEventListener('blur', handleMouseUp)
 
     return () => {
       el.removeEventListener('click', handleClick)
-      el.removeEventListener('mousedown', handleMouseDown)
+      window.removeEventListener('mousedown', handleMouseDown)
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('blur', handleMouseUp)
     }
   }, [])
 
