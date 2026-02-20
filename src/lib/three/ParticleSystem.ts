@@ -14,7 +14,7 @@ import {
   Vector3,
 } from 'three'
 import type { SceneMode, AnimPhase } from '@/types'
-import { generateChristmasHeartPositions, generateHeartPositions } from './ImplicitHeartSampler'
+import { generateChristmasHeartPositions, generateStarPositions } from './ImplicitHeartSampler'
 import { fastSin, fastCos } from './trigTable'
 import { BLOOM_LAYER } from './SelectiveBloom'
 
@@ -220,9 +220,9 @@ export class ParticleSystem {
     // Pre-generate heart positions using implicit surface sampling (Float32Array 避免大量 Vector3 分配)
     const heartPositions = generateChristmasHeartPositions(C.count)
 
-    // 迷你爱心位置：scale=1.4（原始 14 的 1/10），位于圣诞树顶部上方
-    const miniHeartPositions = C.miniHeartCount > 0
-      ? generateHeartPositions(C.miniHeartCount, 1.4, C.treeHeight + 15)
+    // 迷你五角星位置：scale=1.4，位于圣诞树顶部上方（与树顶五角星呼应）
+    const miniStarPositions = C.miniHeartCount > 0
+      ? generateStarPositions(C.miniHeartCount, 1.4, C.treeHeight + 15)
       : null
 
     for (let i = 0; i < C.count; i++) {
@@ -269,15 +269,15 @@ export class ParticleSystem {
         p.tTree.set(rText * Math.cos(aText), 0, rText * Math.sin(aText))
         p.color.set(C.colors.gold)
       } else if (isMiniHeart) {
-        // 迷你爱心：仅在星璇模式显示，圣诞树模式散落在地面
+        // 迷你五角星：仅在星璇模式显示，圣诞树模式散落在地面
         const mhIdx = i - C.textCount
         const mhBase = mhIdx * 3
         const rMh = Math.random() * C.floorRadius
         const aMh = Math.random() * Math.PI * 2
         p.tTree.set(rMh * Math.cos(aMh), 0, rMh * Math.sin(aMh))
         p.tScatter.set(
-          miniHeartPositions![mhBase],
-          miniHeartPositions![mhBase + 1] - C.treeHeight + 12,
+          miniStarPositions![mhBase],
+          miniStarPositions![mhBase + 1] - C.treeHeight + 12,
           0
         )
         p.isCore = true

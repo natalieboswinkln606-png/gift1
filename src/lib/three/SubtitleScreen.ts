@@ -25,6 +25,7 @@ export interface SubtitleScreenConfig {
   yOffset?: number       // 默认 0
   enableBloom?: boolean  // 默认 false
   fontSize?: number      // 默认 17
+  rotationY?: number     // 初始 Y 轴旋转弧度，用于对准摄像头方向（默认 0）
   contentFn?: (userName: string, blessing: string) => string  // 自定义内容生成函数
   initialVisible?: boolean  // 默认 true
 }
@@ -115,8 +116,18 @@ export class SubtitleScreen {
 
     scene.add(this.group)
 
+    // Y 轴旋转（用于对准摄像头方向）
+    if (config?.rotationY !== undefined) {
+      this.group.rotation.y = config.rotationY
+    }
+
     // 初始绘制
     this.drawText()
+
+    // 初始纹理偏移：让文字起始内容出现在 +Z 方向（摄像头正前方）
+    // SphereGeometry 的 u=0 对应 -X 方向，u=0.25 对应 +Z 方向
+    // offset.x = 0.75 使 u=0.25 处采样 u_texture=0（文字开头）
+    this.textTexture.offset.x = 0.75
   }
 
   get visible(): boolean {

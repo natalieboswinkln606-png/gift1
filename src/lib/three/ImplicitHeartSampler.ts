@@ -51,3 +51,68 @@ export function generateHeartPositions(count: number, scale: number, yOffset: nu
 
   return positions
 }
+
+/**
+ * 五角星位置采样：在五角星 2D 轮廓内均匀采样，加少量 Z 厚度。
+ * 返回 Float32Array[count * 3]，布局为 [x0,y0,z0, x1,y1,z1, ...]
+ *
+ * 五角星由 5 个外顶点和 5 个内顶点交替连接构成。
+ * 采样方法：将五角星分解为 10 个三角形（中心到每条边），在三角形内均匀采样。
+ */
+export function generateStarPositions(count: number, scale: number, yOffset: number): Float32Array {
+  const positions = new Float32Array(count * 3)
+
+  // 生成五角星顶点（10 个点交替内外）
+  const outerR = 1.0
+  const innerR = 0.382  // 标准五角星内外比 ≈ sin(18°)/sin(54°)
+  const vertices: Array<[number, number]> = []
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outerR : innerR
+    const angle = (i / 10) * Math.PI * 2 - Math.PI / 2  // 顶点朝上
+    vertices.push([Math.cos(angle) * r, Math.sin(angle) * r])
+  }
+
+  // 将五角星分解为 10 个三角形（中心 → 相邻两顶点）
+  const triangles: Array<[[number, number], [number, number], [number, number]]> = []
+  for (let i = 0; i < 10; i++) {
+    triangles.push([[0, 0], vertices[i], vertices[(i + 1) % 10]])
+  }
+
+  // 预计算每个三角形面积用于加权采样
+  const areas: number[] = []
+  let totalArea = 0
+  for (const [a, b, c] of triangles) {
+    const area = Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) * 0.5
+    areas.push(area)
+    totalArea += area
+  }
+
+  // Z 轴厚度
+  const zThickness = 0.15
+
+  for (let i = 0; i < count; i++) {
+    // 按面积加权选择三角形
+    let r = Math.random() * totalArea
+    let triIdx = 0
+    for (let t = 0; t < areas.length; t++) {
+      r -= areas[t]
+      if (r <= 0) { triIdx = t; break }
+    }
+
+    // 在三角形内均匀采样（重心坐标）
+    const [a, b, c] = triangles[triIdx]
+    let u = Math.random()
+    let v = Math.random()
+    if (u + v > 1) { u = 1 - u; v = 1 - v }
+    const x = a[0] + u * (b[0] - a[0]) + v * (c[0] - a[0])
+    const y = a[1] + u * (b[1] - a[1]) + v * (c[1] - a[1])
+    const z = (Math.random() - 0.5) * zThickness
+
+    const idx = i * 3
+    positions[idx] = x * scale
+    positions[idx + 1] = y * scale + yOffset
+    positions[idx + 2] = z * scale
+  }
+
+  return positions
+}
