@@ -30,13 +30,23 @@
     "iconBgHover": "group-hover:bg-green-400/50"
   },
   {
-    "id": "zhouxingyun",
-    "displayName": "周行芸的礼物",
+    "id": "yilong",
+    "displayName": "伊珑妹妹的礼物",
     "subtitle": "点击进入专属新年祝福",
     "emoji": "🎁",
     "gradient": "from-orange-500/20 to-red-500/20",
     "hoverBorder": "hover:border-orange-400/50",
     "iconBg": "bg-orange-400/30",
     "iconBgHover": "group-hover:bg-orange-400/50"
+  },
+  {
+    "id": "zhouxingyun",
+    "displayName": "周行芸的礼物",
+    "subtitle": "点击进入专属新年祝福",
+    "emoji": "🎁",
+    "gradient": "from-violet-500/20 to-fuchsia-500/20",
+    "hoverBorder": "hover:border-violet-400/50",
+    "iconBg": "bg-violet-400/30",
+    "iconBgHover": "group-hover:bg-violet-400/50"
   }
 ]

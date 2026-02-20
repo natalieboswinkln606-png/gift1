@@ -131,7 +131,7 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
 
     async function initScene() {
       try {
-        // 并行加载所有模块（消除串行 await 链，8 个 import 同时发起）
+        // 并行加载所有模块（消除串行 await 链，9 个 import 同时发起，含 PerformanceMonitor）
         const [
           { SceneManager },
           { ParticleSystem },
@@ -141,6 +141,7 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
           { PhotoSystem },
           { AudioEngine },
           { SnowCanvas },
+          { PerformanceMonitor },
         ] = await Promise.all([
           import('@/lib/three/SceneManager'),
           import('@/lib/three/ParticleSystem'),
@@ -150,6 +151,7 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
           import('@/lib/three/PhotoSystem'),
           import('@/lib/audio/AudioEngine'),
           import('@/lib/three/SnowCanvas'),
+          import('@/lib/utils/PerformanceMonitor'),
         ])
 
         if (disposed) return
@@ -240,8 +242,7 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
         })
         snowCanvasRef.current = snow
 
-        // 运行时 FPS 监控（ULTRA_LOW 设备跳过动态调整）
-        const { PerformanceMonitor } = await import('@/lib/utils/PerformanceMonitor')
+        // 运行时 FPS 监控（PerformanceMonitor 已在首批 Promise.all 中并行加载）
         const perfMon = new PerformanceMonitor(qualityLevel)
         perfMon.setOnQualityChange((q) => {
           useAppStore.getState().setQuality(q)

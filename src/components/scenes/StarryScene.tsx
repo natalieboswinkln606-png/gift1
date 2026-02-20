@@ -95,7 +95,7 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
 
     async function initScene() {
       try {
-        // 并行加载所有模块（消除串行 await 链，6 个 import 同时发起；HeartSceneSystem 延迟到切换时加载）
+        // 并行加载所有模块（消除串行 await 链，7 个 import 同时发起；HeartSceneSystem 延迟到切换时加载）
         const [
           { SceneManager },
           { StarryParticleSystem },
@@ -103,6 +103,7 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
           { EffectComposer },
           { RenderPass },
           { UnrealBloomPass },
+          { PerformanceMonitor },
         ] = await Promise.all([
           import('@/lib/three/SceneManager'),
           import('@/lib/three/StarryParticleSystem'),
@@ -110,6 +111,7 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
           import('three/examples/jsm/postprocessing/EffectComposer.js'),
           import('three/examples/jsm/postprocessing/RenderPass.js'),
           import('three/examples/jsm/postprocessing/UnrealBloomPass.js'),
+          import('@/lib/utils/PerformanceMonitor'),
         ])
 
         if (disposed) return
@@ -217,8 +219,7 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
         const stars = new BackgroundStars(sm.scene, preset.bgStarCount)
         bgStarsRef.current = stars
 
-        // 运行时 FPS 监控（ULTRA_LOW 设备跳过动态调整）
-        const { PerformanceMonitor } = await import('@/lib/utils/PerformanceMonitor')
+        // 运行时 FPS 监控（PerformanceMonitor 已在首批 Promise.all 中并行加载）
         const perfMon = new PerformanceMonitor(qualityLevel)
         perfMon.setOnQualityChange((q) => {
           useAppStore.getState().setQuality(q)

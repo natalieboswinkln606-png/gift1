@@ -118,7 +118,7 @@ export default function SelectorScene({ userId, config }: SelectorSceneProps) {
         icon="圣"
         title="圣诞"
         subtitle="温暖归途 · 灯火阑珊"
-        bgImage="/images/selector-christmas.png"
+        bgImage="/images/selector-christmas.webp"
         gradientOverlay="from-[rgba(60,10,10,0.2)] to-[rgba(30,5,5,0.9)]"
         hoveredPanel={hoveredPanel}
         onHover={setHoveredPanel}
@@ -130,7 +130,7 @@ export default function SelectorScene({ userId, config }: SelectorSceneProps) {
         icon="星"
         title="星河"
         subtitle="终极浪漫 · 永恒答案"
-        bgImage="/images/selector-starry.png"
+        bgImage="/images/selector-starry.webp"
         gradientOverlay="from-[rgba(20,0,40,0.2)] to-[rgba(10,0,20,0.95)]"
         hoveredPanel={hoveredPanel}
         onHover={setHoveredPanel}

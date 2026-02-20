@@ -217,13 +217,13 @@ export class ParticleSystem {
     const C = this.config
     const trunkLerpColor = new Color('#331100')
 
-    // Pre-generate heart positions using implicit surface sampling
+    // Pre-generate heart positions using implicit surface sampling (Float32Array 避免大量 Vector3 分配)
     const heartPositions = generateChristmasHeartPositions(C.count)
 
     // 迷你爱心位置：scale=1.4（原始 14 的 1/10），位于圣诞树顶部上方
     const miniHeartPositions = C.miniHeartCount > 0
       ? generateHeartPositions(C.miniHeartCount, 1.4, C.treeHeight + 15)
-      : []
+      : null
 
     for (let i = 0; i < C.count; i++) {
       const isText = i < C.textCount
@@ -240,7 +240,7 @@ export class ParticleSystem {
         tTree: new Vector3(),
         tScatter: new Vector3(),
         tExplode: new Vector3(),
-        tHeart: heartPositions[i].clone(),
+        tHeart: new Vector3(heartPositions[i * 3], heartPositions[i * 3 + 1], heartPositions[i * 3 + 2]),
         baseScatterPos: new Vector3(),
         noiseOffset: new Vector3(Math.random() * 100, Math.random() * 100, Math.random() * 100),
         color: new Color(),
@@ -271,11 +271,15 @@ export class ParticleSystem {
       } else if (isMiniHeart) {
         // 迷你爱心：仅在星璇模式显示，圣诞树模式散落在地面
         const mhIdx = i - C.textCount
-        const mhPos = miniHeartPositions[mhIdx]
+        const mhBase = mhIdx * 3
         const rMh = Math.random() * C.floorRadius
         const aMh = Math.random() * Math.PI * 2
         p.tTree.set(rMh * Math.cos(aMh), 0, rMh * Math.sin(aMh))
-        p.tScatter.set(mhPos.x, mhPos.y - C.treeHeight + 12, 0)
+        p.tScatter.set(
+          miniHeartPositions![mhBase],
+          miniHeartPositions![mhBase + 1] - C.treeHeight + 12,
+          0
+        )
         p.isCore = true
         p.color.set(C.colors.gold)
       } else if (isTrunk) {
