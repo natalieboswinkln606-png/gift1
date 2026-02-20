@@ -21,7 +21,7 @@ import type { BackgroundStars } from '@/lib/three/BackgroundStars'
 import type { StarBuilder } from '@/lib/three/StarBuilder'
 import type { PhotoSystem } from '@/lib/three/PhotoSystem'
 import type { AudioEngine } from '@/lib/audio/AudioEngine'
-import type { SnowCanvas } from '@/lib/three/SnowCanvas'
+import type { SnowCanvas, SnowCanvasState } from '@/lib/three/SnowCanvas'
 import type { PerformanceMonitor } from '@/lib/utils/PerformanceMonitor'
 
 import { useAnimationLoop } from '@/hooks/useAnimationLoop'
@@ -61,9 +61,6 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
   const [drawingActive, setDrawingActive] = useState(false)
   // 用 state 追踪 audioEngine 以触发重渲染，解决 ref 不触发重渲染导致 MusicPlayer 收到 null 的问题
   const [audioReady, setAudioReady] = useState(false)
-
-  // Track mouse drawing state via ref
-  const mouseDrawingRef = useRef(false)
   // Track mode before photo activation (to restore on close)
   const modeBeforePhotoRef = useRef<SceneMode | null>(null)
   // Track previous activePhoto to detect changes in animation loop
@@ -322,10 +319,10 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
   const enterPaintMode = useCallback(() => {
     const snow = snowCanvasRef.current
     if (!snow || snow.getState() !== 'IDLE') return
-    snow.startSnowstorm()
+    snow.enter()
     setDrawingActive(true)
-    setCurrentMode('TREE') // keep underlying mode, just overlay
-    // Disable OrbitControls during painting
+    setCurrentMode('TREE')
+    // OrbitControls 由 SnowCanvas 的 pointerEvents 自然屏蔽，但显式禁用更安全
     if (sceneManagerRef.current?.controls) {
       sceneManagerRef.current.controls.enabled = false
     }
@@ -334,9 +331,9 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
   const exitPaintMode = useCallback(() => {
     const snow = snowCanvasRef.current
     if (!snow) return
-    const state = snow.getState()
-    if (state === 'DRAWING' || state === 'SNOWSTORM') {
-      snow.forceExit()
+    const snowState = snow.getState()
+    if (snowState === 'DRAWING' || snowState === 'SNOWING') {
+      snow.exit()
     }
     setDrawingActive(false)
     const ps = particleSystemRef.current
@@ -356,7 +353,7 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
       const snow = snowCanvasRef.current
       if (!ps) return
 
-      const isInPaintMode = snow && (snow.getState() === 'DRAWING' || snow.getState() === 'SNOWSTORM')
+      const isInPaintMode = snow && (snow.getState() === 'DRAWING' || snow.getState() === 'SNOWING')
 
       // Escape always exits paint mode first, then dismisses photo
       if (e.key === 'Escape') {
@@ -441,7 +438,7 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
       if (!photos || !sm || !container) return
 
       // Don't handle photo clicks when in paint mode
-      const isInPaintMode = snow && (snow.getState() === 'DRAWING' || snow.getState() === 'SNOWSTORM')
+      const isInPaintMode = snow && (snow.getState() === 'DRAWING' || snow.getState() === 'SNOWING')
       if (isInPaintMode) return
 
       // If a photo is active, click anywhere to dismiss
@@ -467,45 +464,10 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
       }
     }
 
-    // Mouse drawing handlers — SnowCanvas 是 position:fixed，坐标直接用 clientX/clientY
-    function handleMouseDown(e: MouseEvent) {
-      const snow = snowCanvasRef.current
-      if (!snow) return
-      const snowState = snow.getState()
-      if (snowState !== 'DRAWING' && snowState !== 'SNOWSTORM') return
-      if (e.button !== 0) return
-
-      snow.startDrawing(e.clientX, e.clientY)
-      mouseDrawingRef.current = true
-    }
-
-    function handleMouseMove(e: MouseEvent) {
-      if (!mouseDrawingRef.current) return
-      const snow = snowCanvasRef.current
-      if (!snow || snow.getState() !== 'DRAWING') return
-
-      snow.draw(e.clientX, e.clientY)
-    }
-
-    function handleMouseUp() {
-      if (!mouseDrawingRef.current) return
-      const snow = snowCanvasRef.current
-      if (snow) snow.stopDrawing()
-      mouseDrawingRef.current = false
-    }
-
     el.addEventListener('click', handleClick)
-    window.addEventListener('mousedown', handleMouseDown)
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    window.addEventListener('blur', handleMouseUp)
 
     return () => {
       el.removeEventListener('click', handleClick)
-      window.removeEventListener('mousedown', handleMouseDown)
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-      window.removeEventListener('blur', handleMouseUp)
     }
   }, [])
 
