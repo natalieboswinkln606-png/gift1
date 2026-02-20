@@ -445,16 +445,13 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
       }
     }
 
-    // Mouse drawing handlers
+    // Mouse drawing handlers — SnowCanvas 是 position:fixed，坐标直接用 clientX/clientY
     function handleMouseDown(e: MouseEvent) {
       const snow = snowCanvasRef.current
       if (!snow || snow.getState() !== 'DRAWING') return
       if (e.button !== 0) return
 
-      const container = containerRef.current
-      if (!container) return
-      const rect = container.getBoundingClientRect()
-      snow.startDrawing(e.clientX - rect.left, e.clientY - rect.top)
+      snow.startDrawing(e.clientX, e.clientY)
       mouseDrawingRef.current = true
     }
 
@@ -463,10 +460,7 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
       const snow = snowCanvasRef.current
       if (!snow || snow.getState() !== 'DRAWING') return
 
-      const container = containerRef.current
-      if (!container) return
-      const rect = container.getBoundingClientRect()
-      snow.draw(e.clientX - rect.left, e.clientY - rect.top)
+      snow.draw(e.clientX, e.clientY)
     }
 
     function handleMouseUp() {

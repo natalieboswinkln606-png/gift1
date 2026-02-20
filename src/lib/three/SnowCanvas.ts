@@ -104,7 +104,9 @@ export class SnowCanvas {
 
     // Show wrapper
     this.wrapper.style.display = 'block'
-    this.canvas.style.opacity = '0'
+    // 禁用 canvas transition，避免 opacity 淡入与雪花动画冲突
+    this.canvas.style.transition = 'none'
+    this.canvas.style.opacity = '1'
     this.canvas.style.transform = 'translateY(0)'
     this.blurLayer.style.opacity = '0'
 
@@ -146,8 +148,9 @@ export class SnowCanvas {
         // Snowstorm complete — fill solid white and enter drawing mode
         this.ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
         this.ctx.fillRect(0, 0, w, h)
-        this.canvas.style.opacity = '1'
         this.blurLayer.style.opacity = '1'
+        // 恢复 transition（用于后续融化动画）
+        this.canvas.style.transition = 'opacity 1.5s ease, transform 1.5s ease'
         this.state = 'DRAWING'
         this.drawCallCount = 0
         this.erasedArea = 0
@@ -155,13 +158,9 @@ export class SnowCanvas {
       }
     }
 
-    // Fade in canvas
-    const rafId1 = requestAnimationFrame(() => {
-      this.canvas.style.opacity = '1'
-      const rafId2 = requestAnimationFrame(animateSnow)
-      this.rafIds.push(rafId2)
-    })
-    this.rafIds.push(rafId1)
+    // 直接启动雪花动画（不再嵌套 rAF，避免额外帧延迟）
+    const rafId = requestAnimationFrame(animateSnow)
+    this.rafIds.push(rafId)
   }
 
   startDrawing(x: number, y: number): void {
