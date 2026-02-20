@@ -260,6 +260,11 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
           snow.dispose()
           photos.dispose()
           audio.dispose()
+          star.dispose()
+          stars.dispose()
+          bloom.dispose()
+          ps.dispose()
+          sm.dispose()
           return
         }
 

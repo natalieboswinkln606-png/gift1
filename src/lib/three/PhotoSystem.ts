@@ -92,7 +92,10 @@ export class PhotoSystem {
   }
 
   addPhoto(tex: Texture): void {
-    const aspect = tex.image.width / tex.image.height
+    const imgW = tex.image.width
+    const imgH = tex.image.height
+    // 防御：图片损坏时 width/height 可能为 0，导致 NaN
+    const aspect = (imgW && imgH) ? imgW / imgH : 1
     const h = 7
     const w = h * aspect
 

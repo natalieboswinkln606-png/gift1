@@ -179,6 +179,9 @@ export class SubtitleScreen {
       : `  ${this.formatDateTime()}  |  ${this.userName}  |  ${this.blessing}  |  `
     const textWidth = ctx.measureText(content).width
 
+    // 防御：textWidth 为 0 时（空内容或字体未加载），避免无限循环
+    if (textWidth <= 0) return
+
     let xPos = 0
     while (xPos < w) {
       ctx.fillText(content, xPos, h / 2)

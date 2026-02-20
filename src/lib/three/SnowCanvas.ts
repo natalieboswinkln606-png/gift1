@@ -74,6 +74,8 @@ export class SnowCanvas {
       this.resizeTimer = setTimeout(() => {
         this.canvas.width = window.innerWidth
         this.canvas.height = window.innerHeight
+        // resize 后重置擦除面积，避免旧值与新 totalArea 不匹配导致百分比偏差
+        this.erasedArea = 0
         // If in drawing state, refill white
         if (this.state === 'DRAWING') {
           this.ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
@@ -305,6 +307,8 @@ export class SnowCanvas {
   private resetIdleTimer(): void {
     this.clearIdleTimer()
     this.idleTimerId = setTimeout(() => {
+      // 防御：定时器回调时组件可能已销毁
+      if (this.disposed) return
       if (this.state === 'DRAWING') {
         this.forceExit()
         this.onCompleteCallback?.()
