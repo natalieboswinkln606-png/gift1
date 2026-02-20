@@ -174,14 +174,16 @@ export class SelectiveBloom {
     }
   }
 
+  // 预分配 overlay 可见性缓存，避免 render() 每帧 new Array
+  private prevVisibleCache: boolean[] = []
+
   render(overlayMeshes?: Mesh[]): void {
     // 保存 overlay mesh 可见性并隐藏，避免 bloom 溢出到 overlay 上
-    let prevVisible: boolean[] | undefined
     if (overlayMeshes) {
-      prevVisible = []
-      for (const mesh of overlayMeshes) {
-        prevVisible.push(mesh.visible)
-        mesh.visible = false
+      this.prevVisibleCache.length = overlayMeshes.length
+      for (let i = 0; i < overlayMeshes.length; i++) {
+        this.prevVisibleCache[i] = overlayMeshes[i].visible
+        overlayMeshes[i].visible = false
       }
     }
 
@@ -208,9 +210,9 @@ export class SelectiveBloom {
     this.renderer.toneMapping = prevToneMapping
 
     // 恢复 overlay mesh 可见性并在 bloom 之后渲染
-    if (overlayMeshes && prevVisible) {
+    if (overlayMeshes) {
       for (let i = 0; i < overlayMeshes.length; i++) {
-        overlayMeshes[i].visible = prevVisible[i]
+        overlayMeshes[i].visible = this.prevVisibleCache[i]
       }
 
       const hasVisible = overlayMeshes.some((m) => m.visible)

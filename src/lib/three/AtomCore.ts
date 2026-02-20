@@ -61,18 +61,17 @@ export class AtomCore {
     // --- 核心球体 ---
     this.nucleusGroup = new Group()
 
-    // 粒子球面均匀分布
+    // 粒子球面均匀分布（预分配 Float32Array 避免 number[] push 扩容）
     const nucleusGeo = new BufferGeometry()
-    const positions: number[] = []
+    const positions = new Float32Array(coreParticleCount * 3)
     for (let i = 0; i < coreParticleCount; i++) {
       const r = CORE_RADIUS * Math.cbrt(Math.random())
       const theta = Math.random() * Math.PI * 2
       const phi = Math.acos(2 * Math.random() - 1)
-      positions.push(
-        r * Math.sin(phi) * Math.cos(theta),
-        r * Math.sin(phi) * Math.sin(theta),
-        r * Math.cos(phi)
-      )
+      const idx = i * 3
+      positions[idx] = r * Math.sin(phi) * Math.cos(theta)
+      positions[idx + 1] = r * Math.sin(phi) * Math.sin(theta)
+      positions[idx + 2] = r * Math.cos(phi)
     }
     nucleusGeo.setAttribute('position', new Float32BufferAttribute(positions, 3))
 

@@ -596,41 +596,6 @@ export class ParticleSystem {
     if (this.dirtyMeshes[2]) this.meshTetra.instanceMatrix.needsUpdate = true
   }
 
-  /**
-   * 直接写入 4x4 变换矩阵到 InstancedMesh 的 instanceMatrix 数组
-   * 避免 Object3D.updateMatrix() 的 quaternion 转换开销
-   * 矩阵 = Translation * RotationY * RotationX * Scale（简化版，足够粒子使用）
-   */
-  private writeMatrix(
-    array: Float32Array,
-    offset: number,
-    px: number, py: number, pz: number,
-    rx: number, ry: number,
-    s: number
-  ): void {
-    // 预计算 sin/cos（查找表）
-    const cx = fastCos(rx), sx = fastSin(rx)
-    const cy = fastCos(ry), sy = fastSin(ry)
-
-    // 列主序 4x4 矩阵：T * Ry * Rx * S
-    array[offset]      = cy * s
-    array[offset + 1]  = sx * sy * s
-    array[offset + 2]  = -cx * sy * s
-    array[offset + 3]  = 0
-    array[offset + 4]  = 0
-    array[offset + 5]  = cx * s
-    array[offset + 6]  = sx * s
-    array[offset + 7]  = 0
-    array[offset + 8]  = sy * s
-    array[offset + 9]  = -sx * cy * s
-    array[offset + 10] = cx * cy * s
-    array[offset + 11] = 0
-    array[offset + 12] = px
-    array[offset + 13] = py
-    array[offset + 14] = pz
-    array[offset + 15] = 1
-  }
-
   dispose(): void {
     this.meshes.forEach((m) => {
       m.geometry.dispose()

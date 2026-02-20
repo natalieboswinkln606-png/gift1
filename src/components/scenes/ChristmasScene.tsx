@@ -69,6 +69,8 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
   // Track previous activePhoto to detect changes in animation loop
   const prevActivePhotoRef = useRef<Mesh | null>(null)
   const lastTimeRef = useRef(0)
+  // 预分配 overlay 数组，避免动画循环每帧 new Array
+  const overlayMeshesRef = useRef<Mesh[]>([null as unknown as Mesh])
 
   // 动画循环（useAnimationLoop 自动处理 RAF + paused + 卸载清理）
   useAnimationLoop(() => {
@@ -117,8 +119,12 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
     stars.update(time)
 
     // Pass active photo as overlay so it renders after bloom (avoids glow bleed)
-    const overlayMeshes = photos.activePhoto ? [photos.activePhoto] : undefined
-    bloom.render(overlayMeshes)
+    if (photos.activePhoto) {
+      overlayMeshesRef.current[0] = photos.activePhoto
+      bloom.render(overlayMeshesRef.current)
+    } else {
+      bloom.render(undefined)
+    }
   })
 
   // ============================================================
