@@ -228,6 +228,13 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
 
         if (disposed) return
 
+        // 预加载 HeartSceneSystem 模块 + 轮廓图片（后台并行，不阻塞 ORBIT 场景显示）
+        const heartModulePromise = import('@/lib/three/HeartSceneSystem')
+        if (config.starrySilhouette) {
+          const preloadImg = new Image()
+          preloadImg.src = `/users/${userId}/${config.starrySilhouette}`
+        }
+
         // 场景切换：完全隔离两个子场景
         const switchSubScene = async (target: StarrySubScene) => {
           if (subSceneRef.current === target) return
@@ -242,9 +249,9 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
             sm.camera.position.set(0, 8, 50)
             sm.controls.target.set(0, 0, 0)
           } else {
-            // 切换到爱心：延迟初始化 HeartSceneSystem（首次切换时才创建）
+            // 切换到爱心：使用预加载的 HeartSceneSystem 模块（首次切换时才实例化）
             if (!heartSceneRef.current) {
-              const { HeartSceneSystem } = await import('@/lib/three/HeartSceneSystem')
+              const { HeartSceneSystem } = await heartModulePromise
               // await 后重新校验：组件可能已卸载，或用户已切回 ORBIT
               if (disposed || subSceneRef.current !== 'HEART') return
               const hs = new HeartSceneSystem(sm.scene, sm.renderer, config, userId)
