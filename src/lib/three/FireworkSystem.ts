@@ -1,14 +1,15 @@
 class FWParticle {
-  x: number
-  y: number
-  color: string
-  vx: number
-  vy: number
-  alpha: number
-  decay: number
-  gravity: number
+  x = 0
+  y = 0
+  color = ''
+  vx = 0
+  vy = 0
+  alpha = 0
+  decay = 0
+  gravity = 0.05
+  active = false
 
-  constructor(x: number, y: number, color: string) {
+  reset(x: number, y: number, color: string): void {
     this.x = x
     this.y = y
     this.color = color
@@ -19,6 +20,7 @@ class FWParticle {
     this.alpha = 1
     this.decay = Math.random() * 0.015 + 0.01
     this.gravity = 0.05
+    this.active = true
   }
 
   update(): void {
@@ -28,6 +30,7 @@ class FWParticle {
     this.x += this.vx
     this.y += this.vy
     this.alpha -= this.decay
+    if (this.alpha <= 0) this.active = false
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -35,6 +38,20 @@ class FWParticle {
     ctx.fillStyle = this.color
     ctx.fillRect(this.x, this.y, 2, 2)
   }
+}
+
+// 预分配粒子池，避免每次爆炸 new 60 个对象产生 GC 压力
+const POOL_SIZE = 300
+const particlePool: FWParticle[] = Array.from({ length: POOL_SIZE }, () => new FWParticle())
+
+function acquireParticle(x: number, y: number, color: string): FWParticle | null {
+  for (const p of particlePool) {
+    if (!p.active) {
+      p.reset(x, y, color)
+      return p
+    }
+  }
+  return null  // 池满，跳过（视觉上不明显）
 }
 
 class Rocket {
@@ -64,10 +81,10 @@ class Rocket {
       if (this.y <= this.targetY) this.explode()
     } else {
       for (const p of this.particles) p.update()
-      // 原地压缩替代 filter()，消除 GC 压力
+      // 原地压缩：移除已失活的粒子（它们会回到池中被复用）
       let write = 0
       for (let i = 0; i < this.particles.length; i++) {
-        if (this.particles[i].alpha > 0) {
+        if (this.particles[i].active) {
           if (write !== i) this.particles[write] = this.particles[i]
           write++
         }
@@ -80,7 +97,8 @@ class Rocket {
   explode(): void {
     this.exploded = true
     for (let i = 0; i < 60; i++) {
-      this.particles.push(new FWParticle(this.x, this.y, this.color))
+      const p = acquireParticle(this.x, this.y, this.color)
+      if (p) this.particles.push(p)
     }
   }
 
@@ -189,7 +207,7 @@ export class FireworkSystem {
     for (const rocket of this.rockets) {
       if (rocket.exploded) {
         for (const p of rocket.particles) {
-          if (p.alpha > 0.3) {
+          if (p.active && p.alpha > 0.3) {
             positions.push({ x: p.x, y: p.y })
           }
         }

@@ -7,7 +7,7 @@
  * - setPointerCapture 确保拖出边界不断线
  * - position: absolute 挂到传入的 container，避免 fixed 降级问题
  * - touch-action: none + passive: false + preventDefault 三层防触摸滚动
- * - destination-out 合成模式擦除雪层，露出下方 Three.js 场景
+ * - destination-out 合成模式擦除雪层，露出下方亚克力板
  */
 
 export type SnowCanvasState = 'IDLE' | 'SNOWING' | 'DRAWING' | 'MELTING'
@@ -52,6 +52,8 @@ export class SnowCanvas {
   private boundPointerMove: (e: PointerEvent) => void
   private boundPointerUp: (e: PointerEvent) => void
   private boundResize: () => void
+  // 防御层：wrapper 上的事件拦截器（阻止冒泡到 OrbitControls）
+  private boundBlockEvent: (e: Event) => void
 
   constructor(container: HTMLElement, blurAmount = 15) {
     this.container = container
@@ -75,7 +77,7 @@ export class SnowCanvas {
       inset: '0',
       backdropFilter: blurAmount > 0 ? `blur(${blurAmount}px)` : 'none',
       WebkitBackdropFilter: blurAmount > 0 ? `blur(${blurAmount}px)` : 'none',
-      background: 'rgba(255,255,255,0.05)',
+      background: 'rgba(255,255,255,0.25)',
       opacity: '0',
       transition: 'opacity 0.5s ease',
     })
@@ -109,11 +111,24 @@ export class SnowCanvas {
     this.boundPointerUp = this.handlePointerUp.bind(this)
     this.boundResize = this.handleResize.bind(this)
 
+    // 防御层：阻止所有事件冒泡到 container（OrbitControls 绑定在 container 上）
+    this.boundBlockEvent = (e: Event) => {
+      e.stopPropagation()
+    }
+
     this.canvas.addEventListener('pointerdown', this.boundPointerDown, { passive: false })
     this.canvas.addEventListener('pointermove', this.boundPointerMove, { passive: false })
     this.canvas.addEventListener('pointerup', this.boundPointerUp, { passive: false })
     this.canvas.addEventListener('pointercancel', this.boundPointerUp, { passive: false })
     window.addEventListener('resize', this.boundResize)
+
+    // wrapper 防御层：拦截所有可能穿透到 OrbitControls 的事件
+    const blockEvents = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel',
+                         'mousedown', 'mousemove', 'mouseup', 'click', 'dblclick',
+                         'touchstart', 'touchmove', 'touchend', 'wheel'] as const
+    for (const evt of blockEvents) {
+      this.wrapper.addEventListener(evt, this.boundBlockEvent, { passive: false })
+    }
   }
 
   // ==== 公开 API ====
@@ -225,12 +240,20 @@ export class SnowCanvas {
     this.disposed = true
     this.exit()
 
-    // 移除事件
+    // 移除 canvas 事件
     this.canvas.removeEventListener('pointerdown', this.boundPointerDown)
     this.canvas.removeEventListener('pointermove', this.boundPointerMove)
     this.canvas.removeEventListener('pointerup', this.boundPointerUp)
     this.canvas.removeEventListener('pointercancel', this.boundPointerUp)
     window.removeEventListener('resize', this.boundResize)
+
+    // 移除 wrapper 防御层事件
+    const blockEvents = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel',
+                         'mousedown', 'mousemove', 'mouseup', 'click', 'dblclick',
+                         'touchstart', 'touchmove', 'touchend', 'wheel'] as const
+    for (const evt of blockEvents) {
+      this.wrapper.removeEventListener(evt, this.boundBlockEvent)
+    }
 
     // 移除 DOM
     if (this.wrapper.parentNode) {
@@ -246,6 +269,7 @@ export class SnowCanvas {
     if (e.button !== 0 && e.pointerType === 'mouse') return
 
     e.preventDefault()
+    e.stopPropagation()
     // 捕获 pointer，拖出 canvas 边界也不断线
     this.canvas.setPointerCapture(e.pointerId)
 
@@ -254,19 +278,12 @@ export class SnowCanvas {
       this.lastPoint = this.getPoint(e)
       this.resetIdleTimer()
     }
-    // SNOWING 阶段：按下不做事，等动画完成后 pointermove 自动开始画
   }
 
   private handlePointerMove(e: PointerEvent): void {
-    if (this.disposed || this.state !== 'DRAWING') return
+    if (this.disposed || this.state !== 'DRAWING' || !this.isDrawing) return
     e.preventDefault()
-
-    // 如果 pointerdown 发生在 SNOWING 阶段，现在 state 变成 DRAWING 了，自动开始
-    if (!this.isDrawing) {
-      this.isDrawing = true
-      this.lastPoint = this.getPoint(e)
-      return
-    }
+    e.stopPropagation()
 
     const current = this.getPoint(e)
 
@@ -291,6 +308,7 @@ export class SnowCanvas {
   private handlePointerUp(e: PointerEvent): void {
     if (this.disposed) return
     e.preventDefault()
+    e.stopPropagation()
 
     try {
       this.canvas.releasePointerCapture(e.pointerId)
@@ -317,7 +335,7 @@ export class SnowCanvas {
     const ctx = this.ctx
     ctx.save()
     ctx.globalCompositeOperation = 'destination-out'
-    ctx.strokeStyle = 'rgba(0, 0, 0, 1)'
+    ctx.strokeStyle = 'rgba(0,0,0,1)'
     ctx.lineWidth = this.brushSize
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'

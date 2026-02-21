@@ -28,6 +28,7 @@ export class SilhouetteDisplay {
   private silhouetteTexture: CanvasTexture | null = null
   private maxAnisotropy = 1
   private disposed = false
+  private _activeWorker: Worker | null = null
 
   constructor(scene: Scene, renderer?: WebGLRenderer) {
     this.group = new Group()
@@ -41,14 +42,14 @@ export class SilhouetteDisplay {
   /**
    * 带重试的图片加载（指数退避）
    */
-  private async loadImageWithRetry(url: string, maxRetries = 3): Promise<HTMLImageElement> {
+  private async loadImageWithRetry(url: string, maxRetries = 2): Promise<HTMLImageElement> {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (this.disposed) throw new Error('已销毁，中断加载')
       try {
         const img = new Image()
         // 同域静态资源不需要 crossOrigin，设置后反而触发 CORS 预检失败
         await new Promise<void>((resolve, reject) => {
-          const timeoutId = setTimeout(() => reject(new Error('轮廓图加载超时')), 30000)
+          const timeoutId = setTimeout(() => reject(new Error('轮廓图加载超时')), 10000)
           img.onload = () => { clearTimeout(timeoutId); resolve() }
           img.onerror = () => { clearTimeout(timeoutId); reject(new Error('轮廓图加载失败')) }
           img.src = url
@@ -58,8 +59,8 @@ export class SilhouetteDisplay {
         console.warn(`[SilhouetteDisplay] 加载尝试 ${attempt + 1}/${maxRetries} 失败:`, e)
         if (attempt === maxRetries - 1) throw e
         if (this.disposed) throw new Error('已销毁，中断加载')
-        // 指数退避：1s, 2s, 4s
-        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)))
+        // 指数退避：500ms, 1s
+        await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)))
       }
     }
     throw new Error('不可达')
@@ -75,8 +76,9 @@ export class SilhouetteDisplay {
       const img = await this.loadImageWithRetry(`/users/${userId}/${silhouettePath}`)
       if (this.disposed) return
 
-      // 处理图片：颜色翻转 + 边缘检测 + 去背景
-      const processedCanvas = this.processImage(img)
+      // 处理图片：颜色翻转 + 边缘检测 + 去背景（Worker 异步执行）
+      const processedCanvas = await this.processImageAsync(img)
+      if (this.disposed) return
 
       // 创建纹理和 mesh
       this.silhouetteTexture = new CanvasTexture(processedCanvas)
@@ -111,122 +113,75 @@ export class SilhouetteDisplay {
   }
 
   /**
-   * 图像处理流水线：颜色翻转 + Sobel 边缘检测 + 去背景 → 白色线条
+   * 图像处理流水线（Web Worker 异步执行）：
+   * 灰度化 → 背景检测 → Sobel 边缘检测 → 膨胀 → 归一化 → 阈值化 → 白色线条
    */
-  private processImage(img: HTMLImageElement): HTMLCanvasElement {
-    // 缩放到合理处理尺寸（1024 保证轮廓纹理清晰度，仅加载时执行一次）
+  private processImageAsync(img: HTMLImageElement): Promise<HTMLCanvasElement> {
+    // 缩放到合理处理尺寸（1024 保证轮廓纹理清晰度，图片已预压缩到此尺寸）
     const maxDim = 1024
     const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
     const w = Math.floor(img.width * scale)
     const h = Math.floor(img.height * scale)
 
-    // 源 canvas
+    // 主线程：创建临时 canvas 提取像素数据
     const srcCanvas = document.createElement('canvas')
     srcCanvas.width = w
     srcCanvas.height = h
     const srcCtx = srcCanvas.getContext('2d')!
     srcCtx.drawImage(img, 0, 0, w, h)
-    const srcData = srcCtx.getImageData(0, 0, w, h)
-    const src = srcData.data
+    const imageData = srcCtx.getImageData(0, 0, w, h)
     // 释放源 canvas 内存（不再需要）
     srcCanvas.width = 0
 
-    // 灰度化
-    const gray = new Float32Array(w * h)
-    for (let i = 0; i < w * h; i++) {
-      gray[i] = src[i * 4] * 0.299 + src[i * 4 + 1] * 0.587 + src[i * 4 + 2] * 0.114
-    }
+    // 复制 buffer（原 buffer 属于 ImageData，transfer 后不可用）
+    const bufferCopy = imageData.data.buffer.slice(0)
 
-    // 背景检测（边框采样）
-    const borderSamples: number[] = []
-    for (let x = 0; x < w; x++) {
-      borderSamples.push(gray[x])
-      borderSamples.push(gray[(h - 1) * w + x])
-    }
-    for (let y = 0; y < h; y++) {
-      borderSamples.push(gray[y * w])
-      borderSamples.push(gray[y * w + w - 1])
-    }
-    const avgBg = borderSamples.reduce((a, b) => a + b, 0) / borderSamples.length
-    const bgTolerance = 30 // 从 40 降低到 30，更敏感地识别背景
+    return new Promise<HTMLCanvasElement>((resolve, reject) => {
+      // 终止可能还在运行的旧 Worker，防止泄漏
+      this._activeWorker?.terminate()
 
-    // Sobel 边缘检测（直接基于灰度图，不做高斯模糊预处理以保持线条锐利）
-    const edges = new Float32Array(w * h)
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        const idx = y * w + x
-        // 跳过背景像素
-        if (Math.abs(gray[idx] - avgBg) < bgTolerance) continue
+      const worker = new Worker(
+        new URL('../../workers/silhouette.worker.ts', import.meta.url),
+        { type: 'module' },
+      )
+      this._activeWorker = worker
 
-        const gx =
-          -gray[(y - 1) * w + (x - 1)] + gray[(y - 1) * w + (x + 1)]
-          - 2 * gray[y * w + (x - 1)] + 2 * gray[y * w + (x + 1)]
-          - gray[(y + 1) * w + (x - 1)] + gray[(y + 1) * w + (x + 1)]
-        const gy =
-          -gray[(y - 1) * w + (x - 1)] - 2 * gray[(y - 1) * w + x] - gray[(y - 1) * w + (x + 1)]
-          + gray[(y + 1) * w + (x - 1)] + 2 * gray[(y + 1) * w + x] + gray[(y + 1) * w + (x + 1)]
-        edges[idx] = Math.sqrt(gx * gx + gy * gy)
+      worker.onmessage = (e: MessageEvent) => {
+        const { type, buffer, width, height } = e.data
+        if (type !== 'RESULT') return
+
+        // 从 Worker 返回的 ArrayBuffer 构建输出 canvas
+        const resultData = new Uint8ClampedArray(buffer)
+        const outCanvas = document.createElement('canvas')
+        outCanvas.width = width
+        outCanvas.height = height
+        const outCtx = outCanvas.getContext('2d')!
+        const outImageData = new ImageData(resultData, width, height)
+        outCtx.putImageData(outImageData, 0, 0)
+
+        worker.terminate()
+        this._activeWorker = null
+        resolve(outCanvas)
       }
-    }
 
-    // 归一化边缘
-    let maxEdge = 0
-    for (let i = 0; i < w * h; i++) {
-      if (edges[i] > maxEdge) maxEdge = edges[i]
-    }
-
-    // 1px 边缘膨胀（3×3 max pooling）使线条更粗
-    const dilated = new Float32Array(w * h)
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        let maxVal = 0
-        for (let ky = -1; ky <= 1; ky++) {
-          for (let kx = -1; kx <= 1; kx++) {
-            const val = edges[(y + ky) * w + (x + kx)]
-            if (val > maxVal) maxVal = val
-          }
-        }
-        dilated[y * w + x] = maxVal
+      worker.onerror = (err) => {
+        worker.terminate()
+        this._activeWorker = null
+        reject(err)
       }
-    }
 
-    // 基于膨胀后的边缘重新计算最大值
-    let maxDilated = 0
-    for (let i = 0; i < w * h; i++) {
-      if (dilated[i] > maxDilated) maxDilated = dilated[i]
-    }
-
-    // 输出 canvas：白色线条在透明背景上
-    const outCanvas = document.createElement('canvas')
-    outCanvas.width = w
-    outCanvas.height = h
-    const outCtx = outCanvas.getContext('2d')!
-    const outData = outCtx.createImageData(w, h)
-    const out = outData.data
-
-    const edgeThreshold = 0.05 // 从 0.08 降低到 0.05，捕获更多边缘细节
-
-    for (let i = 0; i < w * h; i++) {
-      const normalizedEdge = maxDilated > 0 ? dilated[i] / maxDilated : 0
-
-      if (normalizedEdge > edgeThreshold) {
-        // 白色线条，alpha 与边缘强度成正比（乘数 220 使强边缘接近完全不透明）
-        const alpha = Math.min(255, normalizedEdge * 220)
-        out[i * 4] = 255     // R
-        out[i * 4 + 1] = 255 // G
-        out[i * 4 + 2] = 255 // B
-        out[i * 4 + 3] = alpha
-      } else {
-        // 透明
-        out[i * 4] = 0
-        out[i * 4 + 1] = 0
-        out[i * 4 + 2] = 0
-        out[i * 4 + 3] = 0
-      }
-    }
-
-    outCtx.putImageData(outData, 0, 0)
-    return outCanvas
+      worker.postMessage(
+        {
+          type: 'PROCESS',
+          buffer: bufferCopy,
+          width: w,
+          height: h,
+          bgTolerance: 30,
+          edgeThreshold: 0.05,
+        },
+        { transfer: [bufferCopy] },
+      )
+    })
   }
 
   get visible(): boolean {
@@ -248,6 +203,9 @@ export class SilhouetteDisplay {
 
   dispose(): void {
     this.disposed = true
+    // 终止可能还在运行的 Worker
+    this._activeWorker?.terminate()
+    this._activeWorker = null
     if (this.silhouetteTexture) this.silhouetteTexture.dispose()
     this.group.traverse((child: Object3D) => {
       if (child instanceof Mesh) {

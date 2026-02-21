@@ -15,6 +15,7 @@ import {
   Texture,
   TextureLoader,
   Vector2,
+  Vector3,
   WebGLRenderer,
 } from 'three'
 import gsap from 'gsap'
@@ -47,6 +48,7 @@ export class WelcomeSceneManager {
   private startTime = 0
   private disposed = false
   private exitTimeoutId: ReturnType<typeof setTimeout> | null = null
+  private _projTmp = new Vector3()
   private resizeTimer: ReturnType<typeof setTimeout> | null = null
   private sharedGeometry: PlaneGeometry | null = null
 
@@ -270,7 +272,7 @@ export class WelcomeSceneManager {
       }
 
       if (hitGroup) {
-        const v = hitGroup.position.clone().project(this.camera)
+        const v = this._projTmp.copy(hitGroup.position).project(this.camera)
         const screenX = (v.x * 0.5 + 0.5) * window.innerWidth
         const screenY = (-(v.y * 0.5) + 0.5) * window.innerHeight
         const text = hitGroup.userData.text as string

@@ -91,7 +91,7 @@ export class PhotoSystem {
       tex.colorSpace = SRGBColorSpace
       tex.minFilter = LinearMipmapLinearFilter
       tex.magFilter = LinearFilter
-      tex.anisotropy = Math.min(4, 16)  // 限制 anisotropy 为 4，减少 GPU 采样开销
+      tex.anisotropy = 4  // 限制 anisotropy 为 4，减少 GPU 采样开销
       tex.generateMipmaps = true
       return tex
     })
@@ -218,8 +218,8 @@ export class PhotoSystem {
     this.photos.forEach((p) => {
       const photoMesh = p.children[0] as Mesh | undefined
 
-      if (p === this.activePhoto && !isTree) {
-        // Active photo in SCATTER mode: move to camera front
+      if (p === this.activePhoto) {
+        // Active photo: move to camera front (works in any mode)
         controls.enabled = false
         const localTarget = this.photoGroup.worldToLocal(this.localTmp.copy(hudWorldPos))
 
@@ -249,14 +249,14 @@ export class PhotoSystem {
           ;(photoMesh.material as Material).depthTest = true
         }
 
-        p.scale.lerp(this.vTmp.set(1, 1, 1), 0.1)
+        p.scale.lerp(this.vTmp.set(1, 1, 1), 0.05)
 
         if (isTree) {
           p.position.lerp(p.userData.treePos, 0.1)
           const rot = p.userData.treeRot
           p.rotation.set(rot.x, rot.y, rot.z)
         } else {
-          // 星璇模式：照片随粒子公转（角度随时间变化）+ 保留自转
+          // SCATTER / HEART 模式：照片随粒子公转（角度随时间变化）+ 保留自转
           const r = p.userData.scatterRadius
           const baseAngle = p.userData.scatterAngle as number
           const orbitSpeed = 0.15  // 公转速度，与粒子 shear 旋转协调

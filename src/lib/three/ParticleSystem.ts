@@ -14,7 +14,7 @@ import {
   Vector3,
 } from 'three'
 import type { SceneMode, AnimPhase } from '@/types'
-import { generateChristmasHeartPositions, generateStarPositions } from './ImplicitHeartSampler'
+import { generateStarPositions } from './ImplicitHeartSampler'
 import { fastSin, fastCos } from './trigTable'
 import { BLOOM_LAYER } from './SelectiveBloom'
 
@@ -36,7 +36,6 @@ interface ParticleItem {
   tTree: Vector3
   tScatter: Vector3
   tExplode: Vector3
-  tHeart: Vector3
   baseScatterPos: Vector3
   noiseOffset: Vector3
   color: Color
@@ -217,9 +216,6 @@ export class ParticleSystem {
     const C = this.config
     const trunkLerpColor = new Color('#331100')
 
-    // Pre-generate heart positions using implicit surface sampling (Float32Array 避免大量 Vector3 分配)
-    const heartPositions = generateChristmasHeartPositions(C.count)
-
     // 迷你五角星位置：scale=1.4，位于圣诞树顶部上方（与树顶五角星呼应）
     const miniStarPositions = C.miniHeartCount > 0
       ? generateStarPositions(C.miniHeartCount, 1.4, C.treeHeight + 15)
@@ -240,7 +236,6 @@ export class ParticleSystem {
         tTree: new Vector3(),
         tScatter: new Vector3(),
         tExplode: new Vector3(),
-        tHeart: new Vector3(heartPositions[i * 3], heartPositions[i * 3 + 1], heartPositions[i * 3 + 2]),
         baseScatterPos: new Vector3(),
         noiseOffset: new Vector3(Math.random() * 100, Math.random() * 100, Math.random() * 100),
         color: new Color(),
@@ -393,10 +388,9 @@ export class ParticleSystem {
     }
 
     const isTree = state.mode === 'TREE'
-    const isHeart = state.mode === 'HEART'
 
     // Rotation
-    if (isTree || isHeart) {
+    if (isTree) {
       state.rotVelocity = 0
       const spd = 0.2 * dt
       this.meshes.forEach((m) => { m.rotation.y += spd })
@@ -430,20 +424,12 @@ export class ParticleSystem {
           if (state.animTimer > 0.4) state.animPhase = 'CONVERGE'
         }
       } else if (state.animPhase === 'CONVERGE') {
-        const target = isHeart ? p.tHeart : isTree ? p.tTree : p.baseScatterPos
+        const target = isTree ? p.tTree : p.baseScatterPos
         p.currentPos.lerp(target, 0.08)
         if (i === 0 && p.currentPos.distanceTo(target) < 5) state.animPhase = 'IDLE'
       } else {
         // IDLE physics
-        if (isHeart) {
-          if (!p.settled) {
-            p.currentPos.lerp(p.tHeart, 0.1)
-            if (p.currentPos.distanceToSquared(p.tHeart) < 0.01) {
-              p.currentPos.copy(p.tHeart)
-              p.settled = true
-            }
-          }
-        } else if (isTree) {
+        if (isTree) {
           if (p.isStatic) {
             if (!p.settled) {
               p.currentPos.lerp(p.tTree, 0.2)

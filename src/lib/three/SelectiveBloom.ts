@@ -57,13 +57,10 @@ export class SelectiveBloom {
     const renderPass1 = new RenderPass(scene, camera)
     const bloomPass = new UnrealBloomPass(
       new Vector2(window.innerWidth, window.innerHeight),
-      1.5,  // strength (constructor param)
-      0.4,  // radius (constructor param)
-      0.85  // threshold (constructor param)
+      0.4,   // strength
+      0.3,   // radius
+      0.85   // threshold
     )
-    bloomPass.threshold = 0.85
-    bloomPass.strength = 0.4
-    bloomPass.radius = 0.3
     this.bloomPass = bloomPass
 
     // Bloom 可以在低分辨率下渲染（bloom 本身就是模糊效果，降分辨率对视觉影响极小）

@@ -56,8 +56,8 @@ export class SubtitleScreen {
 
     // --- Canvas 纹理（低端设备使用较小尺寸）---
     this.textCanvas = document.createElement('canvas')
-    this.textCanvas.width = 2048   // 从 4096 降到 2048，减少 75% 纹理内存
-    this.textCanvas.height = 64    // 从 128 降到 64
+    this.textCanvas.width = 1024   // 从 2048 降到 1024，进一步减少 50% 纹理内存
+    this.textCanvas.height = 48    // 从 64 降到 48
     this.textCtx = this.textCanvas.getContext('2d')!
 
     this.textTexture = new CanvasTexture(this.textCanvas)
@@ -94,7 +94,7 @@ export class SubtitleScreen {
     const railRadius = radius * Math.sin(railPhi)
     const railY = radius * Math.cos(railPhi)
 
-    const railGeo = new TorusGeometry(railRadius, 0.02, 16, 128)
+    const railGeo = new TorusGeometry(railRadius, 0.02, 16, 64)
     const railMat = new MeshBasicMaterial({
       color: PRIMARY_COLOR,
       opacity: 0.7,
@@ -125,9 +125,10 @@ export class SubtitleScreen {
     this.drawText()
 
     // 初始纹理偏移：让文字起始内容出现在 +Z 方向（摄像头正前方）
-    // SphereGeometry 的 u=0 对应 -X 方向，u=0.25 对应 +Z 方向
-    // offset.x = 0.75 使 u=0.25 处采样 u_texture=0（文字开头）
-    this.textTexture.offset.x = 0.75
+    // SphereGeometry 的 u=0.25 对应 +Z 方向，从外部看 u 从左到右递增，
+    // 文字自然正向显示，无需翻转 repeat.x。
+    // offset.x = -0.25 使 u_sphere=0.25 处采样到 u_texture=0（文字开头）
+    this.textTexture.offset.x = -0.25
   }
 
   get visible(): boolean {
@@ -200,7 +201,7 @@ export class SubtitleScreen {
       this.textTexture.needsUpdate = true
     }
 
-    // 文字滚动（每帧更新offset，不涉及Canvas重绘）
+    // 文字滚动：增加 offset.x 使文字向左滚动（u 从左到右递增，offset 增加 = 纹理右移 = 文字左移）
     this.textTexture.offset.x += SCROLL_SPEED * dt
   }
 

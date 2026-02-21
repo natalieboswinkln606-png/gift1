@@ -9,7 +9,7 @@ export interface UserConfig {
 }
 
 // Scene modes
-export type SceneMode = 'TREE' | 'SCATTER' | 'HEART'
+export type SceneMode = 'TREE' | 'SCATTER'
 export type AnimPhase = 'IDLE' | 'EXPLODE' | 'CONVERGE'
 export type QualityLevel = 'HIGH' | 'MEDIUM' | 'LOW' | 'ULTRA_LOW'
 

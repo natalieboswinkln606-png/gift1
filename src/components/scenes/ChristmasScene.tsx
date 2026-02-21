@@ -17,7 +17,6 @@ import { useAppStore } from '@/stores/useAppStore'
 import type { SceneManager } from '@/lib/three/SceneManager'
 import type { ParticleSystem } from '@/lib/three/ParticleSystem'
 import type { SelectiveBloom } from '@/lib/three/SelectiveBloom'
-import type { BackgroundStars } from '@/lib/three/BackgroundStars'
 import type { StarBuilder } from '@/lib/three/StarBuilder'
 import type { PhotoSystem } from '@/lib/three/PhotoSystem'
 import type { AudioEngine } from '@/lib/audio/AudioEngine'
@@ -43,7 +42,6 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
   const sceneManagerRef = useRef<SceneManager | null>(null)
   const particleSystemRef = useRef<ParticleSystem | null>(null)
   const selectiveBloomRef = useRef<SelectiveBloom | null>(null)
-  const bgStarsRef = useRef<BackgroundStars | null>(null)
   const starBuilderRef = useRef<StarBuilder | null>(null)
   const photoSystemRef = useRef<PhotoSystem | null>(null)
   const audioEngineRef = useRef<AudioEngine | null>(null)
@@ -61,13 +59,9 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
   const [drawingActive, setDrawingActive] = useState(false)
   // 用 state 追踪 audioEngine 以触发重渲染，解决 ref 不触发重渲染导致 MusicPlayer 收到 null 的问题
   const [audioReady, setAudioReady] = useState(false)
-  // Track mode before photo activation (to restore on close)
-  const modeBeforePhotoRef = useRef<SceneMode | null>(null)
   // Track previous activePhoto to detect changes in animation loop
   const prevActivePhotoRef = useRef<Mesh | null>(null)
   const lastTimeRef = useRef(0)
-  // 预分配 overlay 数组，避免动画循环每帧 new Array
-  const overlayMeshesRef = useRef<Mesh[]>([null as unknown as Mesh])
 
   // 动画循环（useAnimationLoop 自动处理 RAF + paused + 卸载清理）
   useAnimationLoop(() => {
@@ -76,30 +70,19 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
     const photos = photoSystemRef.current
     const audio = audioEngineRef.current
     const star = starBuilderRef.current
-    const stars = bgStarsRef.current
-    if (!sm || !ps || !photos || !audio || !star || !stars) return
+    if (!sm || !ps || !photos || !audio || !star) return
 
     const time = sm.clock.getElapsedTime()
     const dt = time - lastTimeRef.current
     lastTimeRef.current = time
     const isTree = ps.state.mode === 'TREE'
 
-    // Auto-switch to SCATTER when a photo becomes active
+    // 追踪 activePhoto 变化（用于 controls 恢复）
     const curActive = photos.activePhoto
     const prevActive = prevActivePhotoRef.current
-    if (curActive && !prevActive) {
-      modeBeforePhotoRef.current = ps.state.mode as SceneMode
-      if (ps.state.mode !== 'SCATTER') {
-        ps.setTargetMode('SCATTER')
-        setCurrentMode('SCATTER')
-      }
-    } else if (!curActive && prevActive) {
-      const restoreMode = modeBeforePhotoRef.current
-      if (restoreMode && restoreMode !== ps.state.mode) {
-        ps.setTargetMode(restoreMode)
-        setCurrentMode(restoreMode)
-      }
-      modeBeforePhotoRef.current = null
+    if (!curActive && prevActive) {
+      // 照片关闭时恢复 OrbitControls
+      sm.controls.enabled = true
     }
     prevActivePhotoRef.current = curActive
 
@@ -112,23 +95,13 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
 
     photos.update(time, isTree, sm.camera, sm.controls)
     star.update(time, isTree, 85)
-    stars.update(time)
 
     // 渲染：bloom 延迟初始化，可能为 null（首帧用简单渲染降级）
     const bloom = selectiveBloomRef.current
-    if (photos.activePhoto) {
-      if (bloom) {
-        overlayMeshesRef.current[0] = photos.activePhoto
-        bloom.render(overlayMeshesRef.current)
-      } else {
-        sm.renderer.render(sm.scene, sm.camera)
-      }
+    if (bloom) {
+      bloom.render(undefined)
     } else {
-      if (bloom) {
-        bloom.render(undefined)
-      } else {
-        sm.renderer.render(sm.scene, sm.camera)
-      }
+      sm.renderer.render(sm.scene, sm.camera)
     }
   })
 
@@ -147,7 +120,6 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
           { SceneManager },
           { ParticleSystem },
           { SelectiveBloom },
-          { BackgroundStars },
           { StarBuilder },
           { PhotoSystem },
           { AudioEngine },
@@ -157,7 +129,6 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
           import('@/lib/three/SceneManager'),
           import('@/lib/three/ParticleSystem'),
           import('@/lib/three/SelectiveBloom'),
-          import('@/lib/three/BackgroundStars'),
           import('@/lib/three/StarBuilder'),
           import('@/lib/three/PhotoSystem'),
           import('@/lib/audio/AudioEngine'),
@@ -211,10 +182,6 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
         // Selective bloom — 延迟到 setLoading(false) 之后初始化（节省 30-80ms 关键路径时间）
         // bloom 在动画循环中为可选，首帧用 renderer.render 降级渲染
 
-        // Background stars
-        const stars = new BackgroundStars(sm.scene, preset.bgStarCount)
-        bgStarsRef.current = stars
-
         // Tree-top star
         const star = new StarBuilder(sm.scene)
         starBuilderRef.current = star
@@ -257,7 +224,6 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
           photos.dispose()
           audio.dispose()
           star.dispose()
-          stars.dispose()
           ps.dispose()
           sm.dispose()
           return
@@ -302,8 +268,6 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
       photoSystemRef.current = null
       starBuilderRef.current?.dispose()
       starBuilderRef.current = null
-      bgStarsRef.current?.dispose()
-      bgStarsRef.current = null
       selectiveBloomRef.current?.dispose()
       selectiveBloomRef.current = null
       particleSystemRef.current?.dispose()
@@ -319,13 +283,13 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
   const enterPaintMode = useCallback(() => {
     const snow = snowCanvasRef.current
     if (!snow || snow.getState() !== 'IDLE') return
-    snow.enter()
-    setDrawingActive(true)
-    setCurrentMode('TREE')
-    // OrbitControls 由 SnowCanvas 的 pointerEvents 自然屏蔽，但显式禁用更安全
+    // 先禁用 OrbitControls，再进入绘画模式，消除竞态窗口
     if (sceneManagerRef.current?.controls) {
       sceneManagerRef.current.controls.enabled = false
     }
+    snow.enter()
+    setDrawingActive(true)
+    setCurrentMode('TREE')
   }, [])
 
   const exitPaintMode = useCallback(() => {
@@ -393,11 +357,7 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
             photos.setActivePhoto(photos.photos[0])
           }
           break
-        case '5':
-          ps.setTargetMode('HEART')
-          setCurrentMode('HEART')
-          photos?.closeActivePhoto()
-          break
+
         case 'ArrowRight':
           if (ps.state.mode !== 'SCATTER') {
             ps.setTargetMode('SCATTER')

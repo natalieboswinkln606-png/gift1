@@ -1,14 +1,4 @@
 /**
- * Generate heart-shaped positions using implicit surface sampling.
- * Heart equation: (x² + 2.25z² + y² - 1)³ - x²y³ - 0.1125z²y³ < 0
- *
- * 返回 Float32Array（每 3 个元素为一个点的 x,y,z），避免大量 Vector3 堆分配。
- */
-export function generateChristmasHeartPositions(count: number): Float32Array {
-  return generateHeartPositions(count, 14, 45)
-}
-
-/**
  * 参数化爱心位置生成：可自定义缩放和 Y 偏移。
  * 返回 Float32Array[count * 3]，布局为 [x0,y0,z0, x1,y1,z1, ...]
  */

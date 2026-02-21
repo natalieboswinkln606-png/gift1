@@ -65,6 +65,9 @@ export function detectQuality(renderer: import('three').WebGLRenderer): QualityL
   if (memory !== undefined && memory <= 2) {
     // 即使内存低，如果有高端 GPU 也给 LOW 而非 ULTRA_LOW
     result = isHighGPU ? 'LOW' : 'ULTRA_LOW'
+  } else if (cores <= 1) {
+    // 单核设备（含 1CPU 服务器）→ 强制 ULTRA_LOW
+    result = 'ULTRA_LOW'
   } else if (isLowGPU) {
     result = memory !== undefined && memory <= 4 ? 'ULTRA_LOW' : 'LOW'
   } else if (isMobile && !isHighGPU) {
