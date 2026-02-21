@@ -124,16 +124,16 @@ export class HeartDualSystem {
     const countBoxPerSide = Math.floor(HEART_COUNT_PER_SIDE * 0.3)
     const countTetraPerSide = HEART_COUNT_PER_SIDE - countSpherePerSide - countBoxPerSide
 
-    // 创建左侧 mesh
-    const meshSphereL = new InstancedMesh(sphereGeo, mat.clone(), countSpherePerSide)
-    const meshBoxL = new InstancedMesh(boxGeo, mat.clone(), countBoxPerSide)
-    const meshTetraL = new InstancedMesh(tetraGeo, mat.clone(), countTetraPerSide)
+    // 创建左侧 mesh（共享同一个材质，避免 6 个冗余 shader programs）
+    const meshSphereL = new InstancedMesh(sphereGeo, mat, countSpherePerSide)
+    const meshBoxL = new InstancedMesh(boxGeo, mat, countBoxPerSide)
+    const meshTetraL = new InstancedMesh(tetraGeo, mat, countTetraPerSide)
     this.leftMeshes = [meshSphereL, meshBoxL, meshTetraL]
 
-    // 创建右侧 mesh
-    const meshSphereR = new InstancedMesh(sphereGeo, mat.clone(), countSpherePerSide)
-    const meshBoxR = new InstancedMesh(boxGeo, mat.clone(), countBoxPerSide)
-    const meshTetraR = new InstancedMesh(tetraGeo, mat.clone(), countTetraPerSide)
+    // 创建右侧 mesh（共享同一个材质）
+    const meshSphereR = new InstancedMesh(sphereGeo, mat, countSpherePerSide)
+    const meshBoxR = new InstancedMesh(boxGeo, mat, countBoxPerSide)
+    const meshTetraR = new InstancedMesh(tetraGeo, mat, countTetraPerSide)
     this.rightMeshes = [meshSphereR, meshBoxR, meshTetraR]
 
     // 左侧 mesh 挂到 leftGroup
@@ -301,11 +301,7 @@ export class HeartDualSystem {
   }
 
   dispose(): void {
-    const allMeshes = this.allMeshes
-    allMeshes.forEach(m => {
-      // geometry 是共享的，不在此处 dispose（下方统一释放）
-      ;(m.material as Material).dispose()
-    })
+    // 材质是共享的，只释放一次（baseMat）
     // 统一释放共享几何体和基础材质
     this.sharedGeos.forEach(g => g.dispose())
     this.baseMat.dispose()

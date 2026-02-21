@@ -55,16 +55,17 @@ function acquireParticle(x: number, y: number, color: string): FWParticle | null
 }
 
 class Rocket {
-  x: number
-  y: number
-  targetY: number
-  speed: number
-  color: string
-  exploded: boolean
-  dead: boolean
-  particles: FWParticle[]
+  x = 0
+  y = 0
+  targetY = 0
+  speed = 0
+  color = ''
+  exploded = false
+  dead = false
+  particles: FWParticle[] = []
+  active = false
 
-  constructor(w: number, h: number) {
+  reset(w: number, h: number): void {
     this.x = Math.random() * w
     this.y = h
     this.targetY = h * 0.2 + Math.random() * h * 0.3
@@ -72,7 +73,8 @@ class Rocket {
     this.color = `hsla(${Math.random() * 360}, 100%, 70%, 0.8)`
     this.exploded = false
     this.dead = false
-    this.particles = []
+    this.particles.length = 0
+    this.active = true
   }
 
   update(): void {
@@ -111,6 +113,20 @@ class Rocket {
       for (const p of this.particles) p.draw(ctx)
     }
   }
+}
+
+// 预分配 Rocket 池，避免每次发射 new Rocket 产生 GC 压力
+const ROCKET_POOL_SIZE = 20
+const rocketPool: Rocket[] = Array.from({ length: ROCKET_POOL_SIZE }, () => new Rocket())
+
+function acquireRocket(w: number, h: number): Rocket | null {
+  for (const r of rocketPool) {
+    if (!r.active) {
+      r.reset(w, h)
+      return r
+    }
+  }
+  return null  // 池满，跳过
 }
 
 export class FireworkSystem {
@@ -170,9 +186,10 @@ export class FireworkSystem {
     ctx.fillRect(0, 0, w, h)
     ctx.globalCompositeOperation = 'lighter'
 
-    // Spawn rockets
+    // Spawn rockets (from pool)
     if (Math.random() < 0.04) {
-      this.rockets.push(new Rocket(w, h))
+      const rocket = acquireRocket(w, h)
+      if (rocket) this.rockets.push(rocket)
     }
 
     // Update and draw
@@ -180,12 +197,14 @@ export class FireworkSystem {
       rocket.update()
       rocket.draw(ctx)
     }
-    // 原地压缩替代 filter()，消除 GC 压力
+    // 原地压缩替代 filter()，消除 GC 压力；dead rockets 回收到池
     let writeIdx = 0
     for (let i = 0; i < this.rockets.length; i++) {
       if (!this.rockets[i].dead) {
         if (writeIdx !== i) this.rockets[writeIdx] = this.rockets[i]
         writeIdx++
+      } else {
+        this.rockets[i].active = false  // 回收到池
       }
     }
     this.rockets.length = writeIdx

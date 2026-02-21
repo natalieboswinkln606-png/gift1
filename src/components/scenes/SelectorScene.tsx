@@ -100,8 +100,8 @@ export default function SelectorScene({ userId, config }: SelectorSceneProps) {
 
   // 预热最终场景 chunk：用户在选择器停留时并行下载两个场景
   useEffect(() => {
-    import('@/components/scenes/ChristmasScene')
-    import('@/components/scenes/StarryScene')
+    import('@/components/scenes/ChristmasScene').catch(() => {})
+    import('@/components/scenes/StarryScene').catch(() => {})
   }, [])
 
   const handlePanelClick = useCallback((panel: 'christmas' | 'starry') => {

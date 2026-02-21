@@ -132,6 +132,7 @@ export class SilhouetteDisplay {
     const imageData = srcCtx.getImageData(0, 0, w, h)
     // 释放源 canvas 内存（不再需要）
     srcCanvas.width = 0
+    srcCanvas.height = 0
 
     // 复制 buffer（原 buffer 属于 ImageData，transfer 后不可用）
     const bufferCopy = imageData.data.buffer.slice(0)
@@ -146,23 +147,23 @@ export class SilhouetteDisplay {
       )
       this._activeWorker = worker
 
-      worker.onmessage = (e: MessageEvent) => {
-        const { type, buffer, width, height } = e.data
-        if (type !== 'RESULT') return
+        worker.onmessage = (e: MessageEvent) => {
+          const { type, buffer, width, height } = e.data
+          if (type !== 'RESULT') return
 
-        // 从 Worker 返回的 ArrayBuffer 构建输出 canvas
-        const resultData = new Uint8ClampedArray(buffer)
-        const outCanvas = document.createElement('canvas')
-        outCanvas.width = width
-        outCanvas.height = height
-        const outCtx = outCanvas.getContext('2d')!
-        const outImageData = new ImageData(resultData, width, height)
-        outCtx.putImageData(outImageData, 0, 0)
+          // 从 Worker 返回的 ArrayBuffer 构建输出 canvas
+          const resultData = new Uint8ClampedArray(buffer)
+          const outCanvas = document.createElement('canvas')
+          outCanvas.width = width
+          outCanvas.height = height
+          const outCtx = outCanvas.getContext('2d')!
+          const outImageData = new ImageData(resultData, width, height)
+          outCtx.putImageData(outImageData, 0, 0)
 
-        worker.terminate()
-        this._activeWorker = null
-        resolve(outCanvas)
-      }
+          worker.terminate()
+          this._activeWorker = null
+          resolve(outCanvas)
+        }
 
       worker.onerror = (err) => {
         worker.terminate()

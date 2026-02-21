@@ -5,32 +5,43 @@ import { useTypewriter } from '@/hooks/useTypewriter'
 import { useAppStore } from '@/stores/useAppStore'
 
 interface HiddenButtonProps {
+  /** 点击后显示的祝福语 */
+  message?: string
+  /** 点击回调 */
   onActivate: () => void
-  particleProximity: number  // 0-1, how close particles are
+  /** 由父组件传入的固定位置（避免多个按钮重叠） */
+  fixedPosition?: { x: number; y: number }
 }
 
-export default function HiddenButton({ onActivate, particleProximity }: HiddenButtonProps) {
+const DEFAULT_MESSAGE = '特别鸣谢你制造更欢乐的我！'
+
+export default function HiddenButton({ message = DEFAULT_MESSAGE, onActivate, fixedPosition }: HiddenButtonProps) {
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [showBubble, setShowBubble] = useState(false)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const activatedRef = useRef(false)
   const quality = useAppStore((s) => s.quality)
 
-  const message = '特别鸣谢你制造更欢乐的我！'
   const displayText = useTypewriter(message, showBubble)
 
-  // Random position on mount, excluding center area
+  // 使用父组件传入的位置，或自行随机生成（避开中心区域）
   useEffect(() => {
+    if (fixedPosition) {
+      setPosition(fixedPosition)
+      return
+    }
     const w = window.innerWidth
     const h = window.innerHeight
     const margin = 100
     const centerExclusion = { x: w * 0.3, y: h * 0.3, w: w * 0.4, h: h * 0.4 }
 
-    let x: number, y: number
+    let x: number, y: number, attempts = 0
     do {
       x = margin + Math.random() * (w - margin * 2)
       y = margin + Math.random() * (h - margin * 2)
+      attempts++
     } while (
+      attempts < 200 &&
       x > centerExclusion.x &&
       x < centerExclusion.x + centerExclusion.w &&
       y > centerExclusion.y &&
@@ -38,7 +49,7 @@ export default function HiddenButton({ onActivate, particleProximity }: HiddenBu
     )
 
     setPosition({ x, y })
-  }, [])
+  }, [fixedPosition])
 
   const handleClick = useCallback(() => {
     if (activatedRef.current) return
@@ -46,12 +57,12 @@ export default function HiddenButton({ onActivate, particleProximity }: HiddenBu
     setShowBubble(true)
     onActivate()
 
-    // 3秒后收回
+    // 5秒后收回（留足阅读时间）
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
     hideTimerRef.current = setTimeout(() => {
       setShowBubble(false)
       activatedRef.current = false
-    }, 3000)
+    }, 5000)
   }, [onActivate])
 
   // Cleanup timers on unmount
@@ -61,8 +72,8 @@ export default function HiddenButton({ onActivate, particleProximity }: HiddenBu
     }
   }, [])
 
-  // Particle proximity affects visibility — subtle presence
-  const opacity = Math.min(0.2, particleProximity * 0.27 + 0.033)
+  // 亚克力材质隐藏按钮：极低可见度（比绘画场景更隐蔽）
+  const blurClass = quality === 'LOW' || quality === 'ULTRA_LOW' ? 'backdrop-blur-[11px]' : 'backdrop-blur-[16.5px]'
 
   return (
     <div
@@ -73,34 +84,35 @@ export default function HiddenButton({ onActivate, particleProximity }: HiddenBu
         transform: 'translate(-50%, -50%)',
       }}
     >
-      {/* 未激活：圆形隐藏按钮 */}
+      {/* 未激活：亚克力材质圆形隐藏按钮 */}
       {!showBubble && (
         <div
-          className={`w-10 h-10 rounded-full ${quality === 'LOW' || quality === 'ULTRA_LOW' ? 'backdrop-blur-sm' : 'backdrop-blur-[15px]'} bg-white/5 border border-white/5 transition-opacity duration-300 cursor-pointer`}
-          style={{ opacity }}
+          className={`w-12 h-12 rounded-full ${blurClass} border border-white/[0.055] transition-all duration-500 cursor-pointer hover:opacity-[0.242] hover:scale-110`}
+          style={{
+            opacity: 0.2145,
+            background: 'rgba(255,255,255,0.132)',
+          }}
           onClick={handleClick}
         />
       )}
 
-      {/* 激活后：气泡在按钮原位显示（按钮化身为气泡） */}
+      {/* 激活后：气泡在按钮原位显示 */}
       {showBubble && (
-        <div>
-          <div
-            className={`
-              bg-gradient-to-br from-[rgba(255,250,245,0.98)] to-[rgba(255,240,230,0.95)]
-              border-2 border-[#ffd700] rounded-xl
-              text-[#800000] text-sm font-bold leading-relaxed
-              shadow-[0_8px_30px_rgba(0,0,0,0.6),0_0_20px_rgba(255,215,0,0.3)]
-              flex items-center justify-center text-center
-              backdrop-blur-sm
-              w-[220px] min-h-[80px] p-5
-              animate-float
-            `}
-          >
-            <div className="relative">
-              {displayText}
-              <div className="absolute -inset-2 bg-gradient-to-r from-[#ffd700]/20 to-[#ffaa00]/10 blur-xl -z-10 animate-pulse rounded-xl" />
-            </div>
+        <div
+          className={`
+            bg-gradient-to-br from-[rgba(255,250,245,0.98)] to-[rgba(255,240,230,0.95)]
+            border-2 border-[#ffd700] rounded-xl
+            text-[#800000] text-sm font-bold leading-relaxed
+            shadow-[0_8px_30px_rgba(0,0,0,0.6),0_0_20px_rgba(255,215,0,0.3)]
+            flex items-center justify-center text-center
+            backdrop-blur-sm
+            w-[240px] min-h-[80px] p-5
+            animate-float
+          `}
+        >
+          <div className="relative">
+            {displayText}
+            <div className="absolute -inset-2 bg-gradient-to-r from-[#ffd700]/20 to-[#ffaa00]/10 blur-xl -z-10 animate-pulse rounded-xl" />
           </div>
         </div>
       )}

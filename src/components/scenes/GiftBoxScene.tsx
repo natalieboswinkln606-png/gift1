@@ -82,25 +82,17 @@ export default function GiftBoxScene({ userId, config, renderer }: GiftBoxSceneP
       {/* 参考HTML: #interaction-hint — 轻启礼盒 · 纳福迎祥 */}
       <div
         ref={hintRef}
-        className="absolute inset-x-0 bottom-[15%] z-10 text-center pointer-events-none"
+        className="absolute inset-x-0 bottom-[15%] z-10 text-center pointer-events-none animate-breathe"
         style={{
           fontSize: '12px',
           letterSpacing: '4px',
           color: 'rgba(255, 215, 0, 0.8)',
           textShadow: '0 2px 5px rgba(0,0,0,0.8)',
           fontFamily: 'var(--font-noto-serif)',
-          animation: 'breathe 3s infinite ease-in-out',
         }}
       >
         轻启礼盒 · 纳福迎祥
       </div>
-      {/* 参考HTML: @keyframes breathe */}
-      <style jsx>{`
-        @keyframes breathe {
-          0%, 100% { opacity: 0.4; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.05); }
-        }
-      `}</style>
     </div>
   )
 }

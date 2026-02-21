@@ -50,9 +50,9 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
   const snowCanvasRef = useRef<SnowCanvas | null>(null)
   const perfMonRef = useRef<PerformanceMonitor | null>(null)
 
-  // Raycaster for mouse picking
-  const raycasterRef = useRef(new Raycaster())
-  const mouseNDC = useRef(new Vector2())
+  // Raycaster for mouse picking (lazy init, not in render scope)
+  const raycasterRef = useRef<Raycaster | null>(null)
+  const mouseNDC = useRef<Vector2 | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [currentMode, setCurrentMode] = useState<SceneMode>('TREE')
@@ -62,6 +62,8 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
   // Track previous activePhoto to detect changes in animation loop
   const prevActivePhotoRef = useRef<Mesh | null>(null)
   const lastTimeRef = useRef(0)
+  const bloomTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fetchAbortRef = useRef<AbortController | null>(null)
 
   // 动画循环（useAnimationLoop 自动处理 RAF + paused + 卸载清理）
   useAnimationLoop(() => {
@@ -233,15 +235,18 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
 
         // 延迟初始化 bloom（不阻塞首帧渲染，节省 30-80ms）
         // 使用 setTimeout(0) 让首帧先渲染，下一个事件循环再创建 bloom
-        setTimeout(() => {
+        bloomTimeoutRef.current = setTimeout(() => {
           if (disposed) return
           const bloom = new SelectiveBloom(sm.renderer, sm.scene, sm.camera, preset.bloomScale)
           selectiveBloomRef.current = bloom
           sm.onResize((w: number, h: number) => bloom.resize(w, h))
+          bloomTimeoutRef.current = null
         }, 0)
 
         // 后台更新播放列表（不阻塞加载完成）
-        fetch('/music.json')
+        const abortCtrl = new AbortController()
+        fetchAbortRef.current = abortCtrl
+        fetch('/music.json', { signal: abortCtrl.signal })
           .then(r => r.ok ? r.json() as Promise<Array<{ name: string; url: string }>> : null)
           .catch(() => null)
           .then(musicResult => {
@@ -260,6 +265,15 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
     return () => {
       disposed = true
 
+      // 清理 bloom 延迟初始化 timeout
+      if (bloomTimeoutRef.current) {
+        clearTimeout(bloomTimeoutRef.current)
+        bloomTimeoutRef.current = null
+      }
+      // 中止 music.json fetch
+      fetchAbortRef.current?.abort()
+      fetchAbortRef.current = null
+
       snowCanvasRef.current?.dispose()
       snowCanvasRef.current = null
       audioEngineRef.current?.dispose()
@@ -275,7 +289,7 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
       sceneManagerRef.current?.dispose()
       sceneManagerRef.current = null
     }
-  }, [config, userId])
+  }, [userId])
 
   // ============================================================
   // Helper: enter/exit painting mode
@@ -409,6 +423,8 @@ export default function ChristmasScene({ userId, config, renderer }: ChristmasSc
 
       // Raycast to find clicked photo (auto-switches to SCATTER via animation loop)
       const rect = container.getBoundingClientRect()
+      if (!raycasterRef.current) raycasterRef.current = new Raycaster()
+      if (!mouseNDC.current) mouseNDC.current = new Vector2()
       mouseNDC.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
       mouseNDC.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
 

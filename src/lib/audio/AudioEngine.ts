@@ -25,6 +25,7 @@ export class AudioEngine {
 
   constructor() {
     this.audioElement = new Audio()
+    this.audioElement.preload = 'none'
     this.audioElement.crossOrigin = 'anonymous'
     this.audioElement.addEventListener('ended', this.handleEnded)
 

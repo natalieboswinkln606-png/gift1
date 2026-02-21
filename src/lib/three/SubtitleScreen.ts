@@ -194,7 +194,8 @@ export class SubtitleScreen {
     if (!this.group.visible) return
 
     // 仅当秒数变化时重绘Canvas（从60fps降到1fps的Canvas操作）
-    const currentSecond = new Date().getSeconds()
+    const now = new Date()
+    const currentSecond = now.getSeconds()
     if (currentSecond !== this.lastDrawnSecond) {
       this.lastDrawnSecond = currentSecond
       this.drawText()

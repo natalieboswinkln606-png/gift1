@@ -55,17 +55,19 @@ export class SelectiveBloom {
 
     // Bloom composer
     const renderPass1 = new RenderPass(scene, camera)
+
+    // Bloom 可以在低分辨率下渲染（bloom 本身就是模糊效果，降分辨率对视觉影响极小）
+    const bloomW = Math.floor(window.innerWidth * this.bloomScale)
+    const bloomH = Math.floor(window.innerHeight * this.bloomScale)
+
     const bloomPass = new UnrealBloomPass(
-      new Vector2(window.innerWidth, window.innerHeight),
+      new Vector2(bloomW, bloomH),
       0.4,   // strength
       0.3,   // radius
       0.85   // threshold
     )
     this.bloomPass = bloomPass
 
-    // Bloom 可以在低分辨率下渲染（bloom 本身就是模糊效果，降分辨率对视觉影响极小）
-    const bloomW = Math.floor(window.innerWidth * this.bloomScale)
-    const bloomH = Math.floor(window.innerHeight * this.bloomScale)
     const bloomRT = new WebGLRenderTarget(bloomW, bloomH, {
       minFilter: LinearFilter,
       magFilter: LinearFilter,
@@ -173,6 +175,7 @@ export class SelectiveBloom {
 
   // 预分配 overlay 可见性缓存，避免 render() 每帧 new Array
   private prevVisibleCache: boolean[] = []
+  private topVisCache: boolean[] = []
 
   render(overlayMeshes?: Mesh[]): void {
     // 保存 overlay mesh 可见性并隐藏，避免 bloom 溢出到 overlay 上
@@ -220,24 +223,27 @@ export class SelectiveBloom {
 
         // 仅渲染 overlay mesh：临时隐藏所有其他场景子对象
         const topChildren = this.scene.children
-        const topVis: boolean[] = []
-        for (const child of topChildren) {
-          topVis.push(child.visible)
+        // 复用预分配的可见性缓存，避免每帧 new Array
+        if (this.topVisCache.length < topChildren.length) {
+          this.topVisCache = new Array(topChildren.length)
+        }
+        for (let ci = 0; ci < topChildren.length; ci++) {
+          this.topVisCache[ci] = topChildren[ci].visible
           let containsOverlay = false
           for (const mesh of overlayMeshes) {
-            if (mesh.visible && isDescendantOf(mesh, child)) {
+            if (mesh.visible && isDescendantOf(mesh, topChildren[ci])) {
               containsOverlay = true
               break
             }
           }
-          if (!containsOverlay) child.visible = false
+          if (!containsOverlay) topChildren[ci].visible = false
         }
 
         try {
           this.renderer.render(this.scene, this.camera)
         } finally {
           for (let i = 0; i < topChildren.length; i++) {
-            topChildren[i].visible = topVis[i]
+            topChildren[i].visible = this.topVisCache[i]
           }
           this.renderer.autoClear = prevAutoClear
         }

@@ -29,7 +29,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
 
   handleRetry = () => {
     useAppStore.getState().resetState()
-    this.setState({ hasError: false, error: null, resetKey: this.state.resetKey + 1 })
+    this.setState((prev) => ({ hasError: false, error: null, resetKey: prev.resetKey + 1 }))
   }
 
   render() {

@@ -9,6 +9,37 @@ import { getPointerCoords } from '@/lib/utils/pointerUtils'
 import BlessingBubble from '@/components/ui/BlessingBubble'
 import HiddenButton from '@/components/ui/HiddenButton'
 
+/** 隐藏彩蛋音乐路径（仅在本场景播放） */
+const EASTER_EGG_MUSIC = '/music/我们万岁.mp3'
+
+/** 生成 N 个互不重叠的随机位置（避开中心区域，按钮间距 ≥ minDist） */
+function generateNonOverlappingPositions(count: number, minDist = 120): Array<{ x: number; y: number }> {
+  if (typeof window === 'undefined') return Array.from({ length: count }, () => ({ x: 0, y: 0 }))
+  const w = window.innerWidth
+  const h = window.innerHeight
+  const margin = 100
+  const cx = { x: w * 0.3, y: h * 0.3, w: w * 0.4, h: h * 0.4 }
+  const positions: Array<{ x: number; y: number }> = []
+
+  for (let i = 0; i < count; i++) {
+    let x: number, y: number, attempts = 0
+    do {
+      x = margin + Math.random() * (w - margin * 2)
+      y = margin + Math.random() * (h - margin * 2)
+      attempts++
+    } while (
+      attempts < 200 && (
+        // 排除中心区域
+        (x > cx.x && x < cx.x + cx.w && y > cx.y && y < cx.y + cx.h) ||
+        // 排除与已有位置重叠
+        positions.some(p => Math.hypot(p.x - x, p.y - y) < minDist)
+      )
+    )
+    positions.push({ x, y })
+  }
+  return positions
+}
+
 interface WelcomeSceneProps {
   userId: string
   config: UserConfig
@@ -21,7 +52,13 @@ export default function WelcomeScene({ userId, config, renderer }: WelcomeSceneP
   const fireworkRef = useRef<import('@/lib/three/FireworkSystem').FireworkSystem | null>(null)
   const setAppState = useAppStore((s) => s.setAppState)
 
-  const hiddenButtonRef = useRef<HTMLDivElement>(null)
+  // 彩蛋音乐 Audio 实例（场景级生命周期）
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const musicStartedRef = useRef(false)
+  const fadeOutIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // 生成 2 个互不重叠的随机位置（仅 mount 时计算一次）
+  const [hiddenPositions] = useState(() => generateNonOverlappingPositions(2))
 
   const [bubble, setBubble] = useState<{ text: string; x: number; y: number; visible: boolean }>({
     text: '', x: 0, y: 0, visible: false,
@@ -29,7 +66,7 @@ export default function WelcomeScene({ userId, config, renderer }: WelcomeSceneP
   const [transitioning, setTransitioning] = useState(false)
   const transitioningRef = useRef(false)
 
-  // 统一动画循环：驱动 FireworkSystem（useAnimationLoop 自动处理 RAF + paused + 卸载清理）
+  // 统一动画循环：驱动 FireworkSystem
   useAnimationLoop(() => {
     fireworkRef.current?.update()
   })
@@ -41,15 +78,12 @@ export default function WelcomeScene({ userId, config, renderer }: WelcomeSceneP
 
     import('@/lib/three/WelcomeSceneManager').then(({ WelcomeSceneManager }) => {
       if (disposed || !containerRef.current) return
-
-      // Three.js icon sprites
       const mgr = new WelcomeSceneManager(containerRef.current!, renderer)
       mgr.init()
       mgr.animate()
       sceneManagerRef.current = mgr
     })
 
-    // Fireworks (2D canvas overlay)
     import('@/lib/three/FireworkSystem').then(({ FireworkSystem }) => {
       if (disposed || !containerRef.current) return
       const fw = new FireworkSystem()
@@ -57,7 +91,7 @@ export default function WelcomeScene({ userId, config, renderer }: WelcomeSceneP
       fireworkRef.current = fw
     })
 
-    // 预热下一场景 chunk：Welcome 期间并行下载 SelectorScene
+    // 预热下一场景 chunk
     import('@/components/scenes/SelectorScene')
 
     return () => {
@@ -66,7 +100,33 @@ export default function WelcomeScene({ userId, config, renderer }: WelcomeSceneP
       sceneManagerRef.current = null
       fireworkRef.current?.dispose()
       fireworkRef.current = null
+      // 清理淡出 interval
+      if (fadeOutIntervalRef.current) {
+        clearInterval(fadeOutIntervalRef.current)
+        fadeOutIntervalRef.current = null
+      }
+      // 场景卸载时停止并释放彩蛋音乐
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.src = ''
+        audioRef.current = null
+      }
+      musicStartedRef.current = false
     }
+  }, [])
+
+  // 隐藏按钮激活 → 播放彩蛋音乐（任一按钮触发，仅播放一次）
+  const handleHiddenActivate = useCallback(() => {
+    if (musicStartedRef.current) return
+    musicStartedRef.current = true
+
+    const audio = new Audio(EASTER_EGG_MUSIC)
+    audio.volume = 0.6
+    audio.loop = false
+    audioRef.current = audio
+    audio.play().catch((err) => {
+      console.warn('[WelcomeScene] Easter egg music play failed:', err)
+    })
   }, [])
 
   // Mouse/touch move → hover detection
@@ -86,21 +146,34 @@ export default function WelcomeScene({ userId, config, renderer }: WelcomeSceneP
     }
   }, [])
 
-  const handleHiddenActivate = useCallback(() => {}, [])
-
   // Transition to SELECTOR
   const triggerTransition = useCallback(() => {
     if (transitioningRef.current) return
     transitioningRef.current = true
     setTransitioning(true)
 
-    // Hide bubble
     setBubble((prev) => ({ ...prev, visible: false }))
-
-    // Stop fireworks
     fireworkRef.current?.stop()
 
-    // Play exit animation on sprites
+    // 淡出彩蛋音乐（存储 interval ID 以便清理）
+    if (audioRef.current && !audioRef.current.paused) {
+      const audio = audioRef.current
+      const fadeOutId = setInterval(() => {
+        if (!audio || audio.paused) {
+          clearInterval(fadeOutId)
+          return
+        }
+        if (audio.volume > 0.05) {
+          audio.volume = Math.max(0, audio.volume - 0.05)
+        } else {
+          clearInterval(fadeOutId)
+          audio.pause()
+        }
+      }, 50)
+      // 存储到 ref 以便组件卸载时清理
+      fadeOutIntervalRef.current = fadeOutId
+    }
+
     sceneManagerRef.current?.playExitAnimation(() => {
       setAppState('SELECTOR')
     })
@@ -176,10 +249,17 @@ export default function WelcomeScene({ userId, config, renderer }: WelcomeSceneP
         visible={bubble.visible}
       />
 
-      {/* Hidden button */}
-      <div ref={hiddenButtonRef}>
-        <HiddenButton onActivate={handleHiddenActivate} particleProximity={0.2} />
-      </div>
+      {/* 隐藏彩蛋按钮 ×2（亚克力材质，互不重叠的随机位置） */}
+      <HiddenButton
+        message="特别鸣谢你制造更欢乐的我！"
+        onActivate={handleHiddenActivate}
+        fixedPosition={hiddenPositions[0]}
+      />
+      <HiddenButton
+        message="在有生的瞬间能遇到你，竟花光所有运气。"
+        onActivate={handleHiddenActivate}
+        fixedPosition={hiddenPositions[1]}
+      />
 
       {/* Scroll hint */}
       {!transitioning && (

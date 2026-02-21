@@ -198,6 +198,7 @@ export class OrbitRings {
     // 共享不变的 uniform 引用，减少 GPU uniform upload
     mat.uniforms.uTex = baseMat.uniforms.uTex
     mat.uniforms.uColor = baseMat.uniforms.uColor
+    mat.uniforms.uTime = baseMat.uniforms.uTime  // 共享 uTime，update() 只需写一次
     mat.uniforms.uSpeed.value = SPEED_SCALE * speedOffset
     mat.uniforms.uRadius.value = currentRadius
 
@@ -221,9 +222,8 @@ export class OrbitRings {
   }
 
   update(time: number, _dt: number): void {
-    for (const ring of this.rings) {
-      ring.material.uniforms.uTime.value = time
-    }
+    // uTime 是共享引用，只需写一次即可更新所有 5 个环
+    this.baseMaterial.uniforms.uTime.value = time
   }
 
   dispose(): void {

@@ -18,9 +18,9 @@ body {
   contain: layout style;
 }
 
-/* GPU 合成层提示：减少 canvas 重绘时的 layout 计算 */
+/* Canvas 基础样式 */
 canvas {
-  will-change: transform;
+  display: block;
   contain: strict;
 }
 

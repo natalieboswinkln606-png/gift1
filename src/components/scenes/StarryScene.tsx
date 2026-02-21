@@ -1,19 +1,16 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import {
-  BufferAttribute,
-  BufferGeometry,
-  Color,
-  FogExp2,
-  LinearFilter,
-  NoToneMapping,
-  Points,
-  PointsMaterial,
-  RGBAFormat,
-  Vector2,
+import type {
+  BufferAttribute as BufferAttributeType,
+  BufferGeometry as BufferGeometryType,
+  Color as ColorType,
+  FogExp2 as FogExp2Type,
+  Points as PointsType,
+  PointsMaterial as PointsMaterialType,
+  Vector2 as Vector2Type,
   WebGLRenderer,
-  WebGLRenderTarget,
+  WebGLRenderTarget as WebGLRenderTargetType,
 } from 'three'
 import type { UserConfig } from '@/types'
 import { useAppStore } from '@/stores/useAppStore'
@@ -44,7 +41,7 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
   const heartSceneRef = useRef<HeartSceneSystem | null>(null)
   const composerRef = useRef<EffectComposer | null>(null)
   const bgStarsRef = useRef<BackgroundStars | null>(null)
-  const decorStarsRef = useRef<{ geo: BufferGeometry; mat: PointsMaterial; mesh: Points } | null>(null)
+  const decorStarsRef = useRef<{ geo: BufferGeometryType; mat: PointsMaterialType; mesh: PointsType } | null>(null)
   const perfMonRef = useRef<PerformanceMonitor | null>(null)
   const subSceneRef = useRef<StarrySubScene>('ORBIT')
   const keydownRef = useRef<((e: KeyboardEvent) => void) | null>(null)
@@ -95,8 +92,9 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
 
     async function initScene() {
       try {
-        // 并行加载所有模块（消除串行 await 链，7 个 import 同时发起；HeartSceneSystem 延迟到切换时加载）
+        // 并行加载所有模块（消除串行 await 链，8 个 import 同时发起；HeartSceneSystem 延迟到切换时加载）
         const [
+          THREE,
           { SceneManager },
           { StarryParticleSystem },
           { BackgroundStars },
@@ -105,6 +103,7 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
           { UnrealBloomPass },
           { PerformanceMonitor },
         ] = await Promise.all([
+          import('three'),
           import('@/lib/three/SceneManager'),
           import('@/lib/three/StarryParticleSystem'),
           import('@/lib/three/BackgroundStars'),
@@ -113,6 +112,10 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
           import('three/examples/jsm/postprocessing/UnrealBloomPass.js'),
           import('@/lib/utils/PerformanceMonitor'),
         ])
+
+        const { BufferAttribute, BufferGeometry, Color, FogExp2, LinearFilter,
+                NoToneMapping, Points, PointsMaterial, RGBAFormat, Vector2,
+                WebGLRenderTarget } = THREE
 
         if (disposed) return
 
@@ -233,6 +236,9 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
         if (config.starrySilhouette) {
           const preloadImg = new Image()
           preloadImg.src = `/users/${userId}/${config.starrySilhouette}`
+          // 组件卸载时取消加载
+          preloadImg.onload = null
+          preloadImg.onerror = null
         }
 
         // 场景切换：完全隔离两个子场景
@@ -315,7 +321,7 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
       sceneManagerRef.current?.dispose()
       sceneManagerRef.current = null
     }
-  }, [config, userId])
+  }, [userId])
 
   const handleBack = useCallback(() => {
     useAppStore.getState().setAppState('SELECTOR')

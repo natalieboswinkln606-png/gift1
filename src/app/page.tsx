@@ -15,7 +15,7 @@ function StarBackground() {
     canvas.width = window.innerWidth
     canvas.height = window.innerHeight
 
-    const stars = Array.from({ length: 800 }, () => ({
+    const stars = Array.from({ length: 200 }, () => ({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
       radius: Math.random() * 1.5,

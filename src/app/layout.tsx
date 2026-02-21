@@ -39,7 +39,6 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN" className={`${notoSerif.variable} ${playfair.variable}`}>
-      <head />
       <body className="font-serif">{children}</body>
     </html>
   )

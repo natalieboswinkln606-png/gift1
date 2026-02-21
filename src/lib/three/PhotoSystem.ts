@@ -32,6 +32,8 @@ export class PhotoSystem {
   private photoIndex = 0
   private totalPhotos = 0
   private disposed = false
+  // 共享单位 PlaneGeometry，通过 scale 调整大小
+  private unitPlane = new PlaneGeometry(1, 1)
 
   constructor(scene: Scene) {
     this.scene = scene
@@ -114,16 +116,16 @@ export class PhotoSystem {
     const h = 7
     const w = h * aspect
 
-    // Frame
-    const frameGeo = new PlaneGeometry(w + 0.4, h + 1.0)
+    // Frame (use shared unit plane, scale to size)
     const frameMat = new MeshBasicMaterial({ color: 0x222222, side: DoubleSide })
-    const frame = new Mesh(frameGeo, frameMat)
+    const frame = new Mesh(this.unitPlane, frameMat)
+    frame.scale.set(w + 0.4, h + 1.0, 1)
 
-    // Photo
-    const pGeo = new PlaneGeometry(w, h)
+    // Photo (use shared unit plane, scale to size)
     const pMat = new MeshBasicMaterial({ map: tex, side: DoubleSide, toneMapped: false })
-    const pMesh = new Mesh(pGeo, pMat)
-    pMesh.position.set(0, 0.3, 0.05)
+    const pMesh = new Mesh(this.unitPlane, pMat)
+    pMesh.scale.set(w, h, 1)
+    pMesh.position.set(0, 0.3 / (h + 1.0), 0.05)  // normalize position relative to frame scale
     frame.add(pMesh)
 
     // Uniform distribution using golden angle to avoid clustering
@@ -278,17 +280,19 @@ export class PhotoSystem {
   dispose(): void {
     this.disposed = true
     this.photos.forEach((frame) => {
-      frame.geometry.dispose()
+      // geometry 是共享的 unitPlane，不在此处 dispose
       ;(frame.material as Material).dispose()
       frame.children.forEach((child) => {
         if (child instanceof Mesh) {
-          child.geometry.dispose()
+          // geometry 是共享的 unitPlane，不在此处 dispose
           const mat = child.material as MeshBasicMaterial
           mat.map?.dispose()
           mat.dispose()
         }
       })
     })
+    // 统一释放共享 geometry
+    this.unitPlane.dispose()
     this.photos = []
     this.scene.remove(this.photoGroup)
   }

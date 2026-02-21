@@ -86,7 +86,7 @@ export class WelcomeSceneManager {
       const h = window.innerHeight
       this.camera.aspect = w / h
       this.camera.updateProjectionMatrix()
-      this.renderer.setSize(w, h)
+      this.renderer.setSize(w, h, false)
     }, 150)
   }
 
