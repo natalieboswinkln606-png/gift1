@@ -11,11 +11,13 @@ import { BLOOM_LAYER } from './SelectiveBloom'
 
 // --- 配置常量 ---
 const SCREEN_RADIUS = 20
-const SCREEN_HEIGHT = 0.08
+const SCREEN_HEIGHT = 0.04
 const SCROLL_SPEED = 0.03
 const PRIMARY_COLOR = 0xffaa00
-const FONT_SIZE = 32  // 缩小 1/3（48→32），字幕条字体更精致
+const FONT_SIZE = 6
 const TILT_Z_DEG = 30
+// 文字与底部轨道线之间的间距（canvas 像素，占 canvasH 的比例）
+const BOTTOM_PADDING_RATIO = 0.35
 
 /** 可选配置，用于自定义字幕条参数（不传则使用默认值，行为与原版完全一致） */
 export interface SubtitleScreenConfig {
@@ -53,21 +55,34 @@ export class SubtitleScreen {
     const radius = config?.radius ?? SCREEN_RADIUS
     const screenHeight = config?.screenHeight ?? SCREEN_HEIGHT
     const tiltZDeg = config?.tiltZDeg ?? TILT_Z_DEG
+    const phiStart = Math.PI / 2 - screenHeight / 2
 
-    // --- Canvas 纹理（低端设备使用较小尺寸）---
+    // --- Canvas 纹理 ---
+    // 根据球面几何计算精确的 1:1 文字显示
+    // 球面中心纬度 θ_mid = phiStart + screenHeight/2
+    const thetaMid = phiStart + screenHeight / 2
+    const sinThetaMid = Math.sin(thetaMid)
+    // 球面宽高比 = 水平弧长 / 垂直弧长 = 2π × sinθ / screenHeight
+    const sphereAspect = (2 * Math.PI * sinThetaMid) / screenHeight
+
+    // canvas 高度：字体大小 + 底部留白（与轨道线间距）
+    const canvasH = Math.max(16, Math.ceil(this.fontSize * (1 + BOTTOM_PADDING_RATIO) * 1.4))
+    // canvas 宽度：精确匹配球面宽高比，使文字 1:1 显示
+    // 上限 4096（现代 GPU 普遍支持），下限 512
+    const canvasW = Math.min(4096, Math.max(512, Math.round(canvasH * sphereAspect)))
+
     this.textCanvas = document.createElement('canvas')
-    this.textCanvas.width = 1024   // 从 2048 降到 1024，进一步减少 50% 纹理内存
-    this.textCanvas.height = 48    // 从 64 降到 48
+    this.textCanvas.width = canvasW
+    this.textCanvas.height = canvasH
     this.textCtx = this.textCanvas.getContext('2d')!
 
     this.textTexture = new CanvasTexture(this.textCanvas)
     this.textTexture.wrapS = RepeatWrapping
-    this.textTexture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy())  // 限制 anisotropy
+    this.textTexture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy())
     this.textTexture.minFilter = LinearFilter
     this.textTexture.magFilter = LinearFilter
 
     // --- 球面弧形光幕 ---
-    const phiStart = Math.PI / 2 - screenHeight / 2
     const screenGeo = new SphereGeometry(
       radius, 64, 16,  // 从 128,32 降到 64,16，减少 75% 顶点数
       0, Math.PI * 2,
@@ -161,12 +176,16 @@ export class SubtitleScreen {
 
     ctx.clearRect(0, 0, w, h)
 
-    // 底部细装饰线
+    // 文字绘制区域：上半部分（底部留白作为与轨道线的间距）
+    const textAreaH = h * (1 - BOTTOM_PADDING_RATIO)
+    const textCenterY = textAreaH / 2
+
+    // 底部细装饰线（在留白区域顶部）
     ctx.strokeStyle = 'rgba(255, 170, 0, 0.4)'
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.moveTo(0, h - 4)
-    ctx.lineTo(w, h - 4)
+    ctx.moveTo(0, Math.floor(textAreaH) + 2)
+    ctx.lineTo(w, Math.floor(textAreaH) + 2)
     ctx.stroke()
 
     // 绘制文字
@@ -185,7 +204,7 @@ export class SubtitleScreen {
 
     let xPos = 0
     while (xPos < w) {
-      ctx.fillText(content, xPos, h / 2)
+      ctx.fillText(content, xPos, textCenterY)
       xPos += textWidth
     }
   }
