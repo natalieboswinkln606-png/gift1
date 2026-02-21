@@ -18,10 +18,11 @@ function formatTime(seconds: number): string {
 export default function MusicPlayer({ audioEngine }: MusicPlayerProps) {
   // 细粒度 store 订阅：每个字段独立选择器，避免无关状态变化触发重渲染
   const isPlaying = useAudioStore((s) => s.isPlaying)
-  const currentSong = useAudioStore((s) => s.currentSong)
   const volume = useAudioStore((s) => s.volume)
   const playlist = useAudioStore((s) => s.playlist)
   const currentIndex = useAudioStore((s) => s.currentIndex)
+  // 从 playlist 派生当前歌曲名（消除冗余 currentSong 状态）
+  const currentSong = playlist[currentIndex]?.name ?? 'No Music Loaded'
   const [collapsed, setCollapsed] = useState(true)
   const [showPlaylist, setShowPlaylist] = useState(false)
   const [progress, setProgress] = useState(0)

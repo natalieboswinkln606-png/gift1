@@ -118,14 +118,16 @@ export default function WelcomeScene({ userId, config, renderer }: WelcomeSceneP
   // 隐藏按钮激活 → 播放彩蛋音乐（任一按钮触发，仅播放一次）
   const handleHiddenActivate = useCallback(() => {
     if (musicStartedRef.current) return
-    musicStartedRef.current = true
 
     const audio = new Audio(EASTER_EGG_MUSIC)
     audio.volume = 0.6
     audio.loop = false
     audioRef.current = audio
-    audio.play().catch((err) => {
+    audio.play().then(() => {
+      musicStartedRef.current = true
+    }).catch((err) => {
       console.warn('[WelcomeScene] Easter egg music play failed:', err)
+      audioRef.current = null
     })
   }, [])
 

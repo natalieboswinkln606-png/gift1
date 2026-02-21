@@ -236,9 +236,6 @@ export default function StarryScene({ userId, config, renderer }: StarryScenePro
         if (config.starrySilhouette) {
           const preloadImg = new Image()
           preloadImg.src = `/users/${userId}/${config.starrySilhouette}`
-          // 组件卸载时取消加载
-          preloadImg.onload = null
-          preloadImg.onerror = null
         }
 
         // 场景切换：完全隔离两个子场景

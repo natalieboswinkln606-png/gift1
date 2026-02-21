@@ -47,6 +47,7 @@ export class WelcomeSceneManager {
   private activeIcon: Group | null = null
   private startTime = 0
   private disposed = false
+  private exiting = false
   private exitTimeoutId: ReturnType<typeof setTimeout> | null = null
   private _projTmp = new Vector3()
   private resizeTimer: ReturnType<typeof setTimeout> | null = null
@@ -111,7 +112,6 @@ export class WelcomeSceneManager {
     // 纹理去重：只加载 SOURCE_COUNT 个纹理，循环复用
     const loader = new TextureLoader()
     const textures: Texture[] = []
-    const texturePromises: Promise<void>[] = []
     for (let s = 0; s < SOURCE_COUNT; s++) {
       const path = `/icons/icon-${String(s + 1).padStart(2, '0')}.png`
       const tex = loader.load(path, (loadedTex) => {
@@ -214,17 +214,19 @@ export class WelcomeSceneManager {
       if (useAppStore.getState().paused) return
       const time = performance.now() - this.startTime
 
-      // Idle animation: floating + wobble
-      this.iconGroups.forEach((g) => {
-        const idx = g.userData.index as number
-        g.position.y = (g.userData.baseY as number) + Math.sin(time * 0.001 + idx * 0.8) * 0.08
+      // Idle animation: floating + wobble (exit 期间跳过，避免与 gsap exit 动画冲突)
+      if (!this.exiting) {
+        this.iconGroups.forEach((g) => {
+          const idx = g.userData.index as number
+          g.position.y = (g.userData.baseY as number) + Math.sin(time * 0.001 + idx * 0.8) * 0.08
 
-        if (this.activeIcon !== g) {
-          const orig = g.userData.originalRotation as { x: number; y: number; z: number }
-          g.rotation.x = orig.x + Math.sin(time * 0.0008 + idx * 0.5) * 0.03
-          g.rotation.y = orig.y + Math.cos(time * 0.0007 + idx * 0.7) * 0.04
-        }
-      })
+          if (this.activeIcon !== g) {
+            const orig = g.userData.originalRotation as { x: number; y: number; z: number }
+            g.rotation.x = orig.x + Math.sin(time * 0.0008 + idx * 0.5) * 0.03
+            g.rotation.y = orig.y + Math.cos(time * 0.0007 + idx * 0.7) * 0.04
+          }
+        })
+      }
 
       this.renderer.render(this.scene, this.camera)
     }
@@ -308,6 +310,7 @@ export class WelcomeSceneManager {
   }
 
   playExitAnimation(onComplete: () => void): void {
+    this.exiting = true
     this.iconGroups.forEach((g, i) => {
       gsap.to(g.position, {
         y: g.position.y + 10,

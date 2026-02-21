@@ -23,15 +23,15 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 export const BLOOM_LAYER = 1
 
 export class SelectiveBloom {
-  private bloomComposer: EffectComposer
-  private finalComposer: EffectComposer
+  private bloomComposer: EffectComposer | null = null
+  private finalComposer: EffectComposer | null = null
   private bloomLayer = new Layers()
   private materials = new WeakMap<Object3D, Material | Material[]>()
   private scene: Scene
   private renderer: WebGLRenderer
   private camera: Camera
   private darkMaterial: MeshBasicMaterial
-  private mixShader: ShaderMaterial
+  private mixShader: ShaderMaterial | null = null
   private bloomPass!: UnrealBloomPass
   private bloomScale: number
   private nonBloomMeshes: Mesh[] = []
@@ -53,78 +53,75 @@ export class SelectiveBloom {
     this.bloomLayer.set(BLOOM_LAYER)
     this.darkMaterial = new MeshBasicMaterial({ color: 'black' })
 
-    // Bloom composer
-    const renderPass1 = new RenderPass(scene, camera)
-
     // Bloom 可以在低分辨率下渲染（bloom 本身就是模糊效果，降分辨率对视觉影响极小）
     const bloomW = Math.floor(window.innerWidth * this.bloomScale)
     const bloomH = Math.floor(window.innerHeight * this.bloomScale)
 
-    const bloomPass = new UnrealBloomPass(
-      new Vector2(bloomW, bloomH),
-      0.4,   // strength
-      0.3,   // radius
-      0.85   // threshold
-    )
-    this.bloomPass = bloomPass
-
-    const bloomRT = new WebGLRenderTarget(bloomW, bloomH, {
-      minFilter: LinearFilter,
-      magFilter: LinearFilter,
-      format: RGBAFormat,
-    })
-    this.bloomComposer = new EffectComposer(renderer, bloomRT)
-    this.bloomComposer.renderToScreen = false
-    this.bloomComposer.addPass(renderPass1)
-    this.bloomComposer.addPass(bloomPass)
-
     if (this.ultraLowMode) {
-      // ULTRA_LOW 模式：单 composer 直接渲染到屏幕
-      // 避免 finalComposer 的第二次场景渲染，节省 ~50% GPU 开销
+      // ULTRA_LOW 模式：只创建单 composer，跳过 bloomComposer/finalComposer/mixShader
+      // 节省 ~2-4MB GPU 内存（render targets + shader programs）
+      const bloomPass = new UnrealBloomPass(
+        new Vector2(bloomW, bloomH),
+        0.4, 0.3, 0.85
+      )
+      this.bloomPass = bloomPass
       const ulComposer = new EffectComposer(renderer)
       ulComposer.addPass(new RenderPass(scene, camera))
-      ulComposer.addPass(new UnrealBloomPass(
-        new Vector2(bloomW, bloomH),
-        bloomPass.strength,
-        bloomPass.radius,
-        bloomPass.threshold
-      ))
+      ulComposer.addPass(bloomPass)
       ulComposer.addPass(new OutputPass())
       this.ultraLowComposer = ulComposer
+    } else {
+      // 标准 selective bloom pipeline
+      const renderPass1 = new RenderPass(scene, camera)
+      const bloomPass = new UnrealBloomPass(
+        new Vector2(bloomW, bloomH),
+        0.4, 0.3, 0.85
+      )
+      this.bloomPass = bloomPass
+
+      const bloomRT = new WebGLRenderTarget(bloomW, bloomH, {
+        minFilter: LinearFilter,
+        magFilter: LinearFilter,
+        format: RGBAFormat,
+      })
+      this.bloomComposer = new EffectComposer(renderer, bloomRT)
+      this.bloomComposer.renderToScreen = false
+      this.bloomComposer.addPass(renderPass1)
+      this.bloomComposer.addPass(bloomPass)
+
+      // Mix shader
+      this.mixShader = new ShaderMaterial({
+        uniforms: {
+          baseTexture: { value: null },
+          bloomTexture: { value: this.bloomComposer.renderTarget2.texture },
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform sampler2D baseTexture;
+          uniform sampler2D bloomTexture;
+          varying vec2 vUv;
+          void main() {
+            gl_FragColor = texture2D(baseTexture, vUv) + vec4(0.5) * texture2D(bloomTexture, vUv);
+          }
+        `,
+      })
+
+      const mixPass = new ShaderPass(this.mixShader, 'baseTexture')
+      mixPass.needsSwap = true
+
+      // Final composer
+      const renderPass2 = new RenderPass(scene, camera)
+      this.finalComposer = new EffectComposer(renderer)
+      this.finalComposer.addPass(renderPass2)
+      this.finalComposer.addPass(mixPass)
+      this.finalComposer.addPass(new OutputPass())
     }
-
-    // Mix shader
-    this.mixShader = new ShaderMaterial({
-      uniforms: {
-        baseTexture: { value: null },
-        bloomTexture: { value: this.bloomComposer.renderTarget2.texture },
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D baseTexture;
-        uniform sampler2D bloomTexture;
-        varying vec2 vUv;
-        void main() {
-          gl_FragColor = texture2D(baseTexture, vUv) + vec4(0.5) * texture2D(bloomTexture, vUv);
-        }
-      `,
-    })
-
-    const mixPass = new ShaderPass(this.mixShader, 'baseTexture')
-    mixPass.needsSwap = true
-
-    // Final composer
-    const renderPass2 = new RenderPass(scene, camera)
-    this.finalComposer = new EffectComposer(renderer)
-    this.finalComposer.addPass(renderPass2)
-    this.finalComposer.addPass(mixPass)
-    this.finalComposer.addPass(new OutputPass())
   }
 
   // 当场景对象发生增删时调用，使缓存失效
@@ -194,17 +191,16 @@ export class SelectiveBloom {
     if (this.ultraLowMode && this.ultraLowComposer) {
       // ULTRA_LOW 模式：单 composer，场景只渲染 1 次（而非 2 次）
       this.ultraLowComposer.render()
-    } else if (this.ultraLowMode) {
-      // 回退：双 composer（不应到达此分支）
-      this.bloomComposer.render()
-      this.finalComposer.render()
-    } else {
+    } else if (this.bloomComposer && this.finalComposer) {
       // 标准 selective bloom pipeline (cached)
       this.ensureCache()
       this.darkenCached()
       this.bloomComposer.render()
       this.restoreCached()
       this.finalComposer.render()
+    } else {
+      // 回退：直接渲染（不应到达此分支）
+      this.renderer.render(this.scene, this.camera)
     }
 
     this.renderer.toneMapping = prevToneMapping
@@ -252,25 +248,29 @@ export class SelectiveBloom {
   }
 
   resize(width: number, height: number): void {
-    // Bloom composer 使用缩放后的分辨率
-    this.bloomComposer.setSize(
-      Math.floor(width * this.bloomScale),
-      Math.floor(height * this.bloomScale)
-    )
-    // Final composer 保持全分辨率
-    this.finalComposer.setSize(width, height)
-    // ULTRA_LOW 单 composer
     if (this.ultraLowComposer) {
+      // ULTRA_LOW 单 composer
       this.ultraLowComposer.setSize(width, height)
+    }
+    if (this.bloomComposer) {
+      // Bloom composer 使用缩放后的分辨率
+      this.bloomComposer.setSize(
+        Math.floor(width * this.bloomScale),
+        Math.floor(height * this.bloomScale)
+      )
+    }
+    if (this.finalComposer) {
+      // Final composer 保持全分辨率
+      this.finalComposer.setSize(width, height)
     }
   }
 
   dispose(): void {
     this.darkMaterial.dispose()
-    this.mixShader.dispose()
+    this.mixShader?.dispose()
     // EffectComposer.dispose() 内部会释放其 renderTarget1/2，无需手动 double-free
-    this.bloomComposer.dispose()
-    this.finalComposer.dispose()
+    this.bloomComposer?.dispose()
+    this.finalComposer?.dispose()
     if (this.ultraLowComposer) {
       this.ultraLowComposer.dispose()
     }

@@ -8,8 +8,6 @@
 }
 
 body {
-  margin: 0;
-  padding: 0;
   overflow: hidden;
   background-color: #000;
   color: rgb(var(--foreground-rgb));
@@ -22,15 +20,6 @@ body {
 canvas {
   display: block;
   contain: strict;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-/* Smooth scrolling disabled for performance */
-html {
-  scroll-behavior: auto;
 }
 
 /* Hide scrollbars */

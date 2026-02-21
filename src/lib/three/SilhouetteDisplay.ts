@@ -26,6 +26,7 @@ export class SilhouetteDisplay {
   private group: Group
   private silhouetteMesh: Mesh | null = null
   private silhouetteTexture: CanvasTexture | null = null
+  private silhouetteCanvas: HTMLCanvasElement | null = null  // Worker 结果 canvas 引用，dispose 时释放
   private maxAnisotropy = 1
   private disposed = false
   private _activeWorker: Worker | null = null
@@ -81,6 +82,7 @@ export class SilhouetteDisplay {
       if (this.disposed) return
 
       // 创建纹理和 mesh
+      this.silhouetteCanvas = processedCanvas
       this.silhouetteTexture = new CanvasTexture(processedCanvas)
       this.silhouetteTexture.generateMipmaps = true
       this.silhouetteTexture.minFilter = LinearMipmapLinearFilter
@@ -208,6 +210,12 @@ export class SilhouetteDisplay {
     this._activeWorker?.terminate()
     this._activeWorker = null
     if (this.silhouetteTexture) this.silhouetteTexture.dispose()
+    // 释放 Worker 结果 canvas 的 backing store (~4MB for 1024x1024)
+    if (this.silhouetteCanvas) {
+      this.silhouetteCanvas.width = 0
+      this.silhouetteCanvas.height = 0
+      this.silhouetteCanvas = null
+    }
     this.group.traverse((child: Object3D) => {
       if (child instanceof Mesh) {
         child.geometry.dispose()

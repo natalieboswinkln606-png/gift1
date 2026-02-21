@@ -3,7 +3,6 @@ import type { PlaylistItem } from '@/types'
 
 interface AudioStore {
   isPlaying: boolean
-  currentSong: string
   volume: number
   playlist: PlaylistItem[]
   currentIndex: number
@@ -14,14 +13,11 @@ interface AudioStore {
   setPlaylist: (playlist: PlaylistItem[]) => void
   addToPlaylist: (items: PlaylistItem[]) => void
   toggleMute: () => void
-  // 批量更新播放状态（避免 playSong 触发 3 次独立 set 导致 3 次重渲染）
-  setPlayingState: (isPlaying: boolean, currentSong: string, currentIndex: number) => void
   reset: () => void
 }
 
 export const useAudioStore = create<AudioStore>((set) => ({
   isPlaying: false,
-  currentSong: 'No Music Loaded',
   volume: 0.8,
   playlist: [],
   currentIndex: 0,
@@ -32,7 +28,5 @@ export const useAudioStore = create<AudioStore>((set) => ({
   setPlaylist: (playlist) => set({ playlist }),
   addToPlaylist: (items) => set((s) => ({ playlist: [...s.playlist, ...items] })),
   toggleMute: () => set((s) => ({ audioMuted: !s.audioMuted })),
-  // 单次 set 调用批量更新，1 次重渲染替代 3 次
-  setPlayingState: (isPlaying, currentSong, currentIndex) => set({ isPlaying, currentSong, currentIndex }),
-  reset: () => set({ isPlaying: false, currentSong: 'No Music Loaded', volume: 0.8, playlist: [], currentIndex: 0, audioMuted: false }),
+  reset: () => set({ isPlaying: false, volume: 0.8, playlist: [], currentIndex: 0, audioMuted: false }),
 }))

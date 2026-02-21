@@ -254,6 +254,13 @@ export class FireworkSystem {
     }
     this.canvas = null
     this.ctx = null
+    // 重置 pool 中活跃的 rockets 和 particles，避免 stale active flags 导致池容量退化
+    for (const rocket of this.rockets) {
+      for (const p of rocket.particles) {
+        p.active = false
+      }
+      rocket.active = false
+    }
     this.rockets.length = 0
   }
 }

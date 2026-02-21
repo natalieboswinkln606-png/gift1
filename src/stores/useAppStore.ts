@@ -24,7 +24,7 @@ export const useAppStore = create<AppStore>((set) => ({
   appState: 'PRELOAD',
   userId: null,
   userConfig: null,
-  quality: 'HIGH',
+  quality: 'MEDIUM',
   preloadProgress: 0,
   paused: false,
 
@@ -33,5 +33,5 @@ export const useAppStore = create<AppStore>((set) => ({
   setQuality: (quality) => set({ quality }),
   setPreloadProgress: (preloadProgress) => set({ preloadProgress }),
   setPaused: (paused) => set({ paused }),
-  resetState: () => set({ appState: 'PRELOAD', preloadProgress: 0 }),
+  resetState: () => set({ appState: 'PRELOAD', preloadProgress: 0, userId: null, userConfig: null, quality: 'MEDIUM', paused: false }),
 }))

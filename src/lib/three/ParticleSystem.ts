@@ -7,7 +7,6 @@ import {
   InstancedMesh,
   Material,
   MeshBasicMaterial,
-  Object3D,
   Scene,
   Sphere,
   TetrahedronGeometry,
@@ -136,7 +135,6 @@ export class ParticleSystem {
   }
   photoGroup: Group | null = null
 
-  private dummy = new Object3D()
   private vTmp = new Vector3()
   private countSphere: number
   private countBox: number
@@ -170,6 +168,8 @@ export class ParticleSystem {
     this.meshSphere = new InstancedMesh(sphereGeo, mat.clone(), this.countSphere)
     this.meshBox = new InstancedMesh(boxGeo, mat.clone(), this.countBox)
     this.meshTetra = new InstancedMesh(tetraGeo, mat.clone(), this.countTetra)
+    // 释放模板材质（clone 后原件不再需要）
+    mat.dispose()
 
     const meshes = [this.meshSphere, this.meshBox, this.meshTetra]
     this.meshes = meshes
@@ -586,8 +586,12 @@ export class ParticleSystem {
     this.meshes.forEach((m) => {
       m.geometry.dispose()
       ;(m.material as Material).dispose()
+      m.dispose()  // 释放 instanceMatrix/instanceColor GPU buffers
       m.removeFromParent()
     })
     this.particleData = []
+    // 释放预生成的随机数数组（~540KB），帮助 GC 更快回收
+    this.explodeRandoms = null as unknown as Float32Array
+    this.fountainRandoms = null as unknown as Float32Array
   }
 }

@@ -15,10 +15,6 @@ module.exports = {
           light: '#ffeeb0',
           dark: '#b8860b',
         },
-        'cyber-cyan': '#00ffff',
-        'cyber-blue': '#0055ff',
-        'cyber-purple': '#aa00ff',
-        'cyber-gold': '#ffcc00',
       },
       keyframes: {
         breathe: {

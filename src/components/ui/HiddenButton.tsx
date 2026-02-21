@@ -24,31 +24,11 @@ export default function HiddenButton({ message = DEFAULT_MESSAGE, onActivate, fi
 
   const displayText = useTypewriter(message, showBubble)
 
-  // 使用父组件传入的位置，或自行随机生成（避开中心区域）
+  // 使用父组件传入的固定位置
   useEffect(() => {
     if (fixedPosition) {
       setPosition(fixedPosition)
-      return
     }
-    const w = window.innerWidth
-    const h = window.innerHeight
-    const margin = 100
-    const centerExclusion = { x: w * 0.3, y: h * 0.3, w: w * 0.4, h: h * 0.4 }
-
-    let x: number, y: number, attempts = 0
-    do {
-      x = margin + Math.random() * (w - margin * 2)
-      y = margin + Math.random() * (h - margin * 2)
-      attempts++
-    } while (
-      attempts < 200 &&
-      x > centerExclusion.x &&
-      x < centerExclusion.x + centerExclusion.w &&
-      y > centerExclusion.y &&
-      y < centerExclusion.y + centerExclusion.h
-    )
-
-    setPosition({ x, y })
   }, [fixedPosition])
 
   const handleClick = useCallback(() => {

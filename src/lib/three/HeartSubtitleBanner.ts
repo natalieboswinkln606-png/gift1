@@ -13,25 +13,25 @@ export class HeartSubtitleBanner {
   private strip2: SubtitleScreen
 
   constructor(scene: Scene, renderer: WebGLRenderer, userName: string, blessing: string) {
-    // 字幕条一：公历，z 轴 +30°倾斜，启用 bloom（与星轨一致，字体放大 1/3）
+    // 字幕条一：公历，z 轴 +30°倾斜，启用 bloom（宽度与字体在星轨基础上放大 2/5）
     this.strip1 = new SubtitleScreen(scene, renderer, userName, '愿每一秒的流转，都闪烁星辰之光。', {
       radius: 20,
-      screenHeight: 0.04,
+      screenHeight: 0.084,
       tiltZDeg: 30,
       yOffset: -10,
       enableBloom: true,
-      fontSize: 8,
+      fontSize: 17,
       initialVisible: false,
     })
 
-    // 字幕条二：农历，z 轴 -30°倾斜，启用 bloom，自定义内容（与星轨一致，字体放大 1/3）
+    // 字幕条二：农历，z 轴 -30°倾斜，启用 bloom，自定义内容（宽度与字体在星轨基础上放大 2/5）
     this.strip2 = new SubtitleScreen(scene, renderer, userName, blessing, {
       radius: 20,
-      screenHeight: 0.04,
+      screenHeight: 0.084,
       tiltZDeg: -30,
       yOffset: -10,
       enableBloom: true,
-      fontSize: 8,
+      fontSize: 17,
       initialVisible: false,
       contentFn: (name: string, bless: string) => {
         const now = new Date()

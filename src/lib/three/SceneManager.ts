@@ -33,8 +33,6 @@ export class SceneManager {
     window.addEventListener('resize', this.resizeHandler)
   }
 
-  init(): void { /* placeholder */ }
-
   onResize(cb: (w: number, h: number) => void): void {
     this.onResizeCallbacks.push(cb)
   }

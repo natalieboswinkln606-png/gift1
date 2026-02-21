@@ -83,8 +83,10 @@ export class AudioEngine {
 
     try {
       await this.audioElement.play()
-      // 批量更新：1 次 set 替代 3 次，避免 3 次重渲染
-      useAudioStore.getState().setPlayingState(true, song.name, index)
+      // 分别更新 isPlaying 和 currentIndex（currentSong 已从 playlist 派生，无需单独设置）
+      const store = useAudioStore.getState()
+      store.setPlaying(true)
+      useAudioStore.setState({ currentIndex: index })
     } catch (err) {
       console.warn('Audio play failed:', err)
     }
@@ -137,7 +139,11 @@ export class AudioEngine {
   }
 
   setMuted(muted: boolean): void {
-    this.audioElement.muted = muted
+    // 通过 store 触发，让订阅回调同步到 audioElement
+    const store = useAudioStore.getState()
+    if (muted !== store.audioMuted) {
+      store.toggleMute()
+    }
   }
 
   update(): void {
@@ -168,8 +174,9 @@ export class AudioEngine {
   }
 
   getFreq(index: number): number {
-    const bin = Math.floor((index / 200) * 64)
-    return this.dataArray[bin % 128] || 0
+    const len = this.dataArray.length
+    const bin = Math.floor((index / 200) * (len / 2))
+    return this.dataArray[bin % len] || 0
   }
 
   async toggleMic(): Promise<void> {
@@ -210,7 +217,9 @@ export class AudioEngine {
 
   async loadFiles(files: FileList | File[]): Promise<void> {
     await this.ensureContext()
+    // 撤销旧 blob URLs 并从播放列表中移除对应条目
     this.blobUrls.forEach((url) => URL.revokeObjectURL(url))
+    this.playlist = this.playlist.filter(item => !this.blobUrls.some(url => item.url === url))
     this.blobUrls = []
     const newFiles = Array.from(files).map((f) => {
       const url = URL.createObjectURL(f)

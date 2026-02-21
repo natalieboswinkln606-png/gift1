@@ -42,7 +42,9 @@ export default function GiftBoxScene({ userId, config, renderer }: GiftBoxSceneP
       mgr.animate()
       managerRef.current = mgr
       // 预热下一场景 chunk：礼盒动画期间并行下载 WelcomeScene
-      import('@/components/scenes/WelcomeScene')
+      import('@/components/scenes/WelcomeScene').catch(() => {})
+    }).catch((err) => {
+      console.error('[GiftBoxScene] Failed to load manager:', err)
     })
 
     return () => {

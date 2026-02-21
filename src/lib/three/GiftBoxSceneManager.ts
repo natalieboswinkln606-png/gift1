@@ -14,6 +14,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  Object3D,
   PerspectiveCamera,
   PlaneGeometry,
   PointLight,
@@ -470,17 +471,45 @@ export class GiftBoxSceneManager {
 
     window.removeEventListener('resize', this.handleResize)
 
-    this.scene.traverse(obj => {
+    // 收集所有需要清理的对象（包括已从 scene 移除的 groups）
+    // performOpening() 会 scene.remove() 这些 groups，导致 scene.traverse() 找不到它们
+    const disposedMats = new Set<Material>()
+    const allRoots: Group[] = [
+      this.boxGroup, this.lidGroup, this.soulCluster,
+      this.ambientGroup, this.orbitGroup,
+    ].filter(Boolean)
+
+    const disposeObj = (obj: Object3D) => {
       if (obj instanceof Mesh || obj instanceof Points) {
         obj.geometry?.dispose()
         const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
-        mats.forEach(m => { if (m instanceof Material) m.dispose() })
+        mats.forEach(m => {
+          if (m instanceof Material && !disposedMats.has(m)) {
+            disposedMats.add(m)
+            m.dispose()
+          }
+        })
       }
       if (obj instanceof Sprite) {
-        (obj.material as SpriteMaterial).map?.dispose()
-        obj.material.dispose()
+        const sm = obj.material as SpriteMaterial
+        if (!disposedMats.has(sm)) {
+          disposedMats.add(sm)
+          sm.map?.dispose()
+          sm.dispose()
+        }
       }
-    })
+    }
+
+    // 遍历已移除的 groups
+    for (const root of allRoots) {
+      root.traverse(disposeObj)
+    }
+    // 遍历 scene 中剩余对象（lights, hitBox 等）
+    this.scene.traverse(disposeObj)
+    // hitBox 单独处理（可能已从 scene 移除）
+    if (this.hitBox) {
+      disposeObj(this.hitBox)
+    }
 
     this.renderer = null as unknown as WebGLRenderer
     this.scene = null as unknown as Scene

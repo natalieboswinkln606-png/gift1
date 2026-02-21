@@ -301,6 +301,8 @@ export class HeartDualSystem {
   }
 
   dispose(): void {
+    // 释放 InstancedMesh 的 instanceMatrix/instanceColor GPU buffers
+    this.allMeshes.forEach(m => m.dispose())
     // 材质是共享的，只释放一次（baseMat）
     // 统一释放共享几何体和基础材质
     this.sharedGeos.forEach(g => g.dispose())
